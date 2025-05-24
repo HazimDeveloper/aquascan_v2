@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "362979220759",
+    "project_id": "waterwatch-43a4e",
+    "storage_bucket": "waterwatch-43a4e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:362979220759:android:594c9f4500b9017e502b52",
+        "android_client_info": {
+          "package_name": "com.example.aquascan"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZraFLMpogWPfcBim5gN8fkR2hCEP1fjY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
