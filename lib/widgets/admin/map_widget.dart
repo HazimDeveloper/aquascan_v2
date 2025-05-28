@@ -469,8 +469,8 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
     if (widget.currentLocation != null) {
       final locationMarker = Marker(
         point: LatLng(widget.currentLocation!.latitude, widget.currentLocation!.longitude),
-        width: 120,
-        height: 60,
+        width: 200,
+        height: 100,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
