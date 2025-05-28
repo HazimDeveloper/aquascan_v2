@@ -1,4 +1,4 @@
-// lib/widgets/admin/map_widget.dart
+// lib/widgets/admin/map_widget.dart - COMPLETE FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -30,58 +30,55 @@ class RouteMapWidget extends StatefulWidget {
 
 class _RouteMapWidgetState extends State<RouteMapWidget> {
   late MapController _mapController;
-  int? _shortestRouteIndex;
   ReportModel? _selectedReportForInfo;
   bool _isInfoWindowVisible = false;
   
   // Constants for travel calculations
-  static const double AVERAGE_SPEED_KM_PER_HOUR = 30.0; // Average speed in urban areas
+  static const double AVERAGE_SPEED_KM_PER_HOUR = 30.0;
+  
+  // Debug logging
+  final bool _debugMode = true;
+  
+  void _logDebug(String message) {
+    if (_debugMode) {
+      print('🗺️ MapWidget: $message');
+    }
+  }
   
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
-    _findShortestRoute();
+    _logRouteData();
   }
   
   @override
   void didUpdateWidget(RouteMapWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.routeModel != widget.routeModel) {
-      _findShortestRoute();
+      _logRouteData();
     }
   }
   
-  // Find the shortest route segment
-  void _findShortestRoute() {
-    if (widget.routeModel != null && widget.routeModel!.segments.isNotEmpty) {
-      double shortestDistance = double.infinity;
-      int shortestIndex = -1;
+  void _logRouteData() {
+    if (widget.routeModel != null) {
+      _logDebug('Route model available:');
+      _logDebug('  - Points: ${widget.routeModel!.points.length}');
+      _logDebug('  - Segments: ${widget.routeModel!.segments.length}');
+      _logDebug('  - Total distance: ${widget.routeModel!.totalDistance}');
       
       for (int i = 0; i < widget.routeModel!.segments.length; i++) {
         final segment = widget.routeModel!.segments[i];
-        if (segment.distance < shortestDistance) {
-          shortestDistance = segment.distance;
-          shortestIndex = i;
-        }
+        _logDebug('  - Segment $i: ${segment.polyline.length} polyline points, distance: ${segment.distance}');
       }
-      
-      setState(() {
-        _shortestRouteIndex = shortestIndex;
-      });
     } else {
-      setState(() {
-        _shortestRouteIndex = null;
-      });
+      _logDebug('No route model available');
     }
   }
   
   // Calculate estimated travel time based on distance and average speed
   String calculateTravelTime(double distanceInKm) {
-    // Calculate hours
     double timeInHours = distanceInKm / AVERAGE_SPEED_KM_PER_HOUR;
-    
-    // Convert to minutes for shorter times
     int minutes = (timeInHours * 60).round();
     
     if (minutes < 60) {
@@ -106,7 +103,7 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
           mapController: _mapController,
           options: MapOptions(
             initialCenter: _calculateMapCenter(),
-            initialZoom: 14.0,
+            initialZoom: 13.0,
             minZoom: 4,
             maxZoom: 18,
             onTap: (_, __) {
@@ -117,15 +114,17 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
             },
             onMapReady: () {
               // Zoom to fit all points with padding
-              final bounds = _calculateMapBounds();
-              if (bounds != null) {
-                _mapController.fitCamera(
-                  CameraFit.bounds(
-                    bounds: bounds,
-                    padding: const EdgeInsets.all(50.0),
-                  ),
-                );
-              }
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final bounds = _calculateMapBounds();
+                if (bounds != null) {
+                  _mapController.fitCamera(
+                    CameraFit.bounds(
+                      bounds: bounds,
+                      padding: const EdgeInsets.all(50.0),
+                    ),
+                  );
+                }
+              });
             },
           ),
           children: [
@@ -136,7 +135,7 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
               userAgentPackageName: 'com.example.water_watch',
             ),
             
-            // Polylines for routes (shortest route on top for visibility)
+            // Polylines for routes
             PolylineLayer(
               polylines: _buildRoutePolylines(),
             ),
@@ -148,11 +147,11 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
           ],
         ),
         
-        // Route info panel (shows the shortest route info prominently)
-        if (widget.routeModel != null && _shortestRouteIndex != null)
-          _buildShortestRouteInfoPanel(),
+        // Route info panel
+        if (widget.routeModel != null && widget.routeModel!.totalDistance > 0)
+          _buildRouteInfoPanel(),
           
-        // Map controls (zoom, etc.)
+        // Map controls
         Positioned(
           right: 16,
           bottom: 16,
@@ -260,14 +259,14 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
     );
   }
   
-  Widget _buildShortestRouteInfoPanel() {
-    if (_shortestRouteIndex == null || _shortestRouteIndex! >= widget.routeModel!.segments.length) {
-      return const SizedBox.shrink();
-    }
-    
-    final shortestSegment = widget.routeModel!.segments[_shortestRouteIndex!];
-    final distance = shortestSegment.distance;
+  Widget _buildRouteInfoPanel() {
+    final distance = widget.routeModel!.totalDistance;
     final travelTime = calculateTravelTime(distance);
+    
+    String routeType = 'Route';
+    if (widget.routeModel!.segments.isNotEmpty) {
+      routeType = 'Water Supply Route';
+    }
     
     return Positioned(
       top: 16,
@@ -292,28 +291,26 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
                       color: Colors.blue.withOpacity(0.2),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.route, color: Colors.blue),
+                    child: const Icon(Icons.water_drop, color: Colors.blue),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Fastest Route',
-                          style: TextStyle(
+                        Text(
+                          routeType,
+                          style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
                         Text(
-                          shortestSegment.to.address,
+                          'Closest water supply found',
                           style: TextStyle(
                             color: Colors.grey.shade600,
                             fontSize: 12,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -415,278 +412,236 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
   List<Polyline> _buildRoutePolylines() {
     final polylines = <Polyline>[];
     
+    _logDebug('Building polylines...');
+    
     if (widget.routeModel == null || widget.routeModel!.segments.isEmpty) {
+      _logDebug('No route model or segments, returning empty polylines');
       return polylines;
     }
     
-    // First add all regular (non-shortest) routes
-    for (int i = 0; i < widget.routeModel!.segments.length; i++) {
-      // Skip the shortest route - we'll add it last so it's on top
-      if (i == _shortestRouteIndex) continue;
-      
-      final segment = widget.routeModel!.segments[i];
-      if (segment.polyline.isEmpty) continue;
-      
-      final points = segment.polyline
-          .map((point) => LatLng(point.latitude, point.longitude))
-          .toList();
-      
-      polylines.add(
-        Polyline(
-          points: points,
-          color: Colors.grey.withOpacity(0.7),
-          strokeWidth: 3.0,
-        ),
-      );
-    }
+    _logDebug('Route model has ${widget.routeModel!.segments.length} segments');
     
-    // Add the shortest route last so it's on top
-    if (_shortestRouteIndex != null && 
-        _shortestRouteIndex! < widget.routeModel!.segments.length) {
-      final shortestSegment = widget.routeModel!.segments[_shortestRouteIndex!];
-      if (shortestSegment.polyline.isNotEmpty) {
-        final points = shortestSegment.polyline
-            .map((point) => LatLng(point.latitude, point.longitude))
+    for (int i = 0; i < widget.routeModel!.segments.length; i++) {
+      final segment = widget.routeModel!.segments[i];
+      _logDebug('Processing segment $i with ${segment.polyline.length} polyline points');
+      
+      if (segment.polyline.isEmpty) {
+        _logDebug('Segment $i has no polyline points, skipping');
+        continue;
+      }
+      
+      try {
+        final points = segment.polyline
+            .map((point) {
+              _logDebug('Converting point: lat=${point.latitude}, lng=${point.longitude}');
+              return LatLng(point.latitude, point.longitude);
+            })
             .toList();
         
-        polylines.add(
-          Polyline(
-            points: points,
-            color: Colors.blue,
-            strokeWidth: 5.0,
-          ),
-        );
+        if (points.length >= 2) {
+          // Create a prominent polyline for the route
+          polylines.add(
+            Polyline(
+              points: points,
+              color: Colors.blue,
+              strokeWidth: 5.0,
+            ),
+          );
+          _logDebug('Added polyline for segment $i with ${points.length} points');
+        } else {
+          _logDebug('Segment $i has less than 2 points, skipping polyline');
+        }
+      } catch (e) {
+        _logDebug('Error creating polyline for segment $i: $e');
       }
     }
     
+    _logDebug('Created ${polylines.length} polylines total');
     return polylines;
   }
-  List<Marker> _buildMarkers() {
-  final markers = <Marker>[];
-  final topMarkers = <Marker>[]; // Separate list for markers that should be on top
   
-  // Display water points focused on the shortest route
-  if (widget.routeModel != null) {
-    // First identify the points on the shortest path
-    List<String> shortestRouteNodeIds = [];
-    if (_shortestRouteIndex != null && 
-        _shortestRouteIndex! < widget.routeModel!.segments.length) {
-      final shortestSegment = widget.routeModel!.segments[_shortestRouteIndex!];
-      shortestRouteNodeIds.add(shortestSegment.from.nodeId);
-      shortestRouteNodeIds.add(shortestSegment.to.nodeId);
+  List<Marker> _buildMarkers() {
+    final markers = <Marker>[];
+    
+    _logDebug('Building markers...');
+    
+    // Add current location marker first (will be on bottom layer)
+    if (widget.currentLocation != null) {
+      final locationMarker = Marker(
+        point: LatLng(widget.currentLocation!.latitude, widget.currentLocation!.longitude),
+        width: 120,
+        height: 60,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.my_location, color: Colors.white, size: 20),
+            ),
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Text(
+                "You",
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+      markers.add(locationMarker);
+      _logDebug('Added current location marker');
     }
     
-    // Add markers for all route points
-    for (final point in widget.routeModel!.points) {
-      // Skip the start point (already added as current location)
-      if (point.nodeId == "start") continue;
+    // Add route point markers if route exists
+    if (widget.routeModel != null && widget.routeModel!.points.isNotEmpty) {
+      _logDebug('Adding ${widget.routeModel!.points.length} route point markers');
       
-      final isOnShortestRoute = shortestRouteNodeIds.contains(point.nodeId);
-      final isWaterSupply = point.nodeId.startsWith('supply-');
-      
-      // Create marker based on type and route status
-      Marker marker;
-      
-      // Emphasize points on the shortest route, especially the water supply point
-      if (isOnShortestRoute && isWaterSupply) {
-        marker = Marker(
-          point: LatLng(point.location.latitude, point.location.longitude),
-          width: 140, // Increased from 70 to fix width issues
-          height: 80, // Adjusted height
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.water_drop,
-                  color: Colors.white,
-                  size: 24,
-                ),
-              ),
-              Container(
-                margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 2,
-                    ),
-                  ],
-                ),
-                child: const Text(
-                  "Best Water Supply",
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+      for (int i = 0; i < widget.routeModel!.points.length; i++) {
+        final point = widget.routeModel!.points[i];
+        
+        // Skip the start point (current location)
+        if (point.nodeId == "start" || point.nodeId.contains("current")) {
+          continue;
+        }
+        
+        final isWaterSupply = point.nodeId.contains('supply') || 
+                             point.label?.toLowerCase().contains('water') == true ||
+                             point.address.toLowerCase().contains('water') ||
+                             point.address.toLowerCase().contains('supply');
+        
+        if (isWaterSupply) {
+          final marker = Marker(
+            point: LatLng(point.location.latitude, point.location.longitude),
+            width: 140,
+            height: 80,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
                     color: Colors.blue,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.water_drop,
+                    color: Colors.white,
+                    size: 24,
                   ),
                 ),
+                Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    point.label ?? "Water Supply",
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+          markers.add(marker);
+          _logDebug('Added water supply marker for point: ${point.nodeId}');
+        }
+      }
+    } 
+    // If no route, show report markers
+    else {
+      _logDebug('No route available, showing ${widget.reports.length} report markers');
+      
+      for (final report in widget.reports) {
+        final isSelected = widget.selectedReports.any((r) => r.id == report.id);
+        
+        final marker = Marker(
+          point: LatLng(report.location.latitude, report.location.longitude),
+          width: 80,
+          height: 40,
+          child: GestureDetector(
+            onTap: () {
+              if (widget.onReportTap != null) {
+                widget.onReportTap!(report);
+              } else {
+                setState(() {
+                  _selectedReportForInfo = report;
+                  _isInfoWindowVisible = true;
+                });
+              }
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                color: isSelected ? AppTheme.primaryColor : Colors.red,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-            ],
-          ),
-        );
-        // Add to top markers to ensure it's rendered last (on top)
-        topMarkers.add(marker);
-      } 
-      // For other points, show smaller markers
-      else if (isWaterSupply) {
-        marker = Marker(
-          point: LatLng(point.location.latitude, point.location.longitude),
-          width: 80, // Increased from 40
-          height: 40,
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade600,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Icon(
-              Icons.water_drop,
-              color: Colors.white,
-              size: 16,
-            ),
-          ),
-        );
-        markers.add(marker);
-      } else if (!isWaterSupply) {
-        // Report marker
-        marker = Marker(
-          point: LatLng(point.location.latitude, point.location.longitude),
-          width: 80, // Increased from 40
-          height: 40,
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: Colors.red.shade400,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Icon(
-              Icons.warning,
-              color: Colors.white,
-              size: 16,
+              child: Icon(
+                isSelected ? Icons.check : Icons.warning,
+                color: Colors.white,
+                size: 20,
+              ),
             ),
           ),
         );
         markers.add(marker);
       }
+      _logDebug('Added ${widget.reports.length} report markers');
     }
-  } 
-  // If no route model, show basic report markers
-  else {
-    for (final report in widget.reports) {
-      final isSelected = widget.selectedReports.any((r) => r.id == report.id);
-      
-      final marker = Marker(
-        point: LatLng(report.location.latitude, report.location.longitude),
-        width: 80, // Increased from 40
-        height: 40,
-        child: GestureDetector(
-          onTap: () {
-            if (widget.onReportTap != null) {
-              widget.onReportTap!(report);
-            } else {
-              setState(() {
-                _selectedReportForInfo = report;
-                _isInfoWindowVisible = true;
-              });
-            }
-          },
-          child: Container(
-            decoration: BoxDecoration(
-              color: isSelected ? AppTheme.primaryColor : Colors.red,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(
-              isSelected ? Icons.check : Icons.warning,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-        ),
-      );
-      markers.add(marker);
-    }
+    
+    _logDebug('Total markers created: ${markers.length}');
+    return markers;
   }
-  
-  // Add current location marker last (will be on top of regular markers)
-  if (widget.currentLocation != null) {
-    final locationMarker = Marker(
-      point: LatLng(widget.currentLocation!.latitude, widget.currentLocation!.longitude),
-      width: 120, // Increased from 60
-      height: 60,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.my_location, color: Colors.white, size: 20),
-          ),
-          Container(
-            margin: const EdgeInsets.only(top: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 2,
-                ),
-              ],
-            ),
-            child: const Text(
-              "You",
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-    markers.add(locationMarker);
-  }
-  
-  // Combine regular markers with top markers (top markers will be rendered last = on top)
-  return [...markers, ...topMarkers];
-}
   
   Widget _buildReportInfoCard(ReportModel report) {
     return Card(
@@ -782,7 +737,6 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
                 
                 ElevatedButton(
                   onPressed: () {
-                    // Find closest water source to this report
                     _findClosestWaterSource(report);
                   },
                   style: ElevatedButton.styleFrom(
@@ -800,7 +754,6 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
   }
   
   void _findClosestWaterSource(ReportModel report) {
-    // This would normally call your backend
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Finding closest water supply...'),
@@ -814,8 +767,7 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
       _selectedReportForInfo = null;
     });
     
-    // In a real app, this would trigger the route optimization
-    // For now, we'll just simulate selecting the report if onReportTap is available
+    // Trigger report selection if callback is available
     if (widget.onReportTap != null) {
       widget.onReportTap!(report);
     }
@@ -831,7 +783,7 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
       final firstReport = widget.reports.first;
       return LatLng(firstReport.location.latitude, firstReport.location.longitude);
     } else {
-      return const LatLng(0, 0);
+      return const LatLng(6.4451267, 100.401005); // Default to Malaysia coordinates
     }
   }
   
@@ -878,22 +830,22 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
     );
   }
   
-Color _getWaterQualityColor(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return Colors.blue;
-    case WaterQualityState.lowTemp:
-      return Colors.green;
-    case WaterQualityState.highPh:
-    case WaterQualityState.lowPh:
-      return Colors.orange;
-    case WaterQualityState.highPhTemp:
-      return Colors.red;
-    case WaterQualityState.lowTempHighPh:
-      return Colors.purple;
-    case WaterQualityState.unknown:
-    default:
-      return Colors.grey;
+  Color _getWaterQualityColor(WaterQualityState quality) {
+    switch (quality) {
+      case WaterQualityState.optimum:
+        return Colors.blue;
+      case WaterQualityState.lowTemp:
+        return Colors.green;
+      case WaterQualityState.highPh:
+      case WaterQualityState.lowPh:
+        return Colors.orange;
+      case WaterQualityState.highPhTemp:
+        return Colors.red;
+      case WaterQualityState.lowTempHighPh:
+        return Colors.purple;
+      case WaterQualityState.unknown:
+      default:
+        return Colors.grey;
+    }
   }
-}
 }

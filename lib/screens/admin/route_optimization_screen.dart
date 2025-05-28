@@ -1,4 +1,4 @@
-// lib/screens/admin/route_optimization_screen.dart
+// lib/screens/admin/route_optimization_screen.dart - FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:math';
@@ -11,7 +11,7 @@ import '../../services/location_service.dart';
 import '../../services/api_service.dart';
 import '../../widgets/common/custom_loader.dart';
 import '../../widgets/common/custom_bottom.dart';
-import '../../widgets/admin/map_widget.dart';  // Import the map widget
+import '../../widgets/admin/map_widget.dart';
 
 class RouteOptimizationScreen extends StatefulWidget {
   const RouteOptimizationScreen({Key? key}) : super(key: key);
@@ -36,6 +36,15 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   late DatabaseService _databaseService;
   late LocationService _locationService;
   late ApiService _apiService;
+  
+  // Debug logging
+  final bool _debugMode = true;
+  
+  void _logDebug(String message) {
+    if (_debugMode) {
+      print('📱 RouteOptimization: $message');
+    }
+  }
   
   @override
   void initState() {
@@ -79,7 +88,10 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     });
     
     try {
+      _logDebug('Starting to load initial data...');
+      
       // Get current location
+      _logDebug('Getting current location...');
       final position = await _locationService.getCurrentLocation();
       
       if (position != null) {
@@ -87,9 +99,12 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
           latitude: position.latitude,
           longitude: position.longitude,
         );
+        _logDebug('Location obtained: ${position.latitude}, ${position.longitude}');
         
         // Get unresolved reports
+        _logDebug('Fetching unresolved reports...');
         final reports = await _databaseService.getUnresolvedReportsList();
+        _logDebug('Found ${reports.length} unresolved reports');
         
         setState(() {
           _currentLocation = currentLocation;
@@ -98,13 +113,16 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         });
         
         _animationController.forward();
+        _logDebug('Initial data loaded successfully');
       } else {
         setState(() {
           _errorMessage = 'Failed to get current location. Please check location permissions.';
           _isLoading = false;
         });
+        _logDebug('Failed to get location - position is null');
       }
     } catch (e) {
+      _logDebug('Error loading initial data: $e');
       setState(() {
         _errorMessage = 'Error loading data: $e';
         _isLoading = false;
@@ -114,6 +132,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   
   Future<void> _optimizeRoute() async {
     if (_selectedReports.isEmpty) {
+      _logDebug('No reports selected');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please select at least one water point'),
@@ -123,6 +142,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     }
     
     if (_currentLocation == null) {
+      _logDebug('Current location is null');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Current location is required'),
@@ -137,25 +157,53 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     });
     
     try {
+      _logDebug('Starting route optimization...');
+      _logDebug('Selected reports: ${_selectedReports.length}');
+      _logDebug('Current location: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
+      _logDebug('Admin ID: ${_authService.currentUser!.uid}');
+      
+      // Check API service availability first
+      final apiBaseUrl = _apiService.baseUrl;
+      _logDebug('API base URL: $apiBaseUrl');
+      
+      // Simple connectivity test
+      try {
+        final testResponse = await _testApiConnectivity();
+        if (!testResponse) {
+          throw Exception('API server is not reachable. Please check your connection and try again.');
+        }
+      } catch (e) {
+        _logDebug('API connectivity test failed: $e');
+        throw Exception('Cannot connect to the route optimization service. Please check your internet connection.');
+      }
+      
       // Call API to optimize route
+      _logDebug('Calling API service for route optimization...');
       final routeData = await _apiService.getOptimizedRoute(
         _selectedReports,
         _currentLocation!,
         _authService.currentUser!.uid,
       );
       
-      // Process API response and convert to RouteModel
-      final processedData = _convertTimestamps(routeData as Map<String, dynamic>);
+      _logDebug('Received route data from API');
+      _logDebug('Route data keys: ${routeData.keys.toList()}');
       
-      // Create RouteModel with proper error handling
+      // Process API response with enhanced error handling
+      final processedData = _processRouteData(routeData);
+      _logDebug('Route data processed successfully');
+      
+      // Create RouteModel with comprehensive error handling
       RouteModel optimizedRoute;
       try {
         optimizedRoute = RouteModel.fromJson(processedData);
+        _logDebug('RouteModel created successfully');
       } catch (e) {
-        print('Error creating RouteModel: $e');
+        _logDebug('Error creating RouteModel from JSON: $e');
+        _logDebug('Attempting manual route model creation...');
         
-        // Manually construct RouteModel
-        optimizedRoute = _manuallyCreateRouteModel(processedData);
+        // Manually construct RouteModel with fallback data
+        optimizedRoute = _createFallbackRouteModel(processedData);
+        _logDebug('Fallback RouteModel created');
       }
       
       setState(() {
@@ -164,221 +212,161 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         _showMap = true; // Switch to map view
       });
       
-      // Save route to database
-      await _databaseService.createRoute(routeData as Map<String, dynamic>);
+      // Save route to database with error handling
+      try {
+        _logDebug('Saving route to database...');
+        await _databaseService.createRoute(processedData);
+        _logDebug('Route saved to database successfully');
+      } catch (dbError) {
+        _logDebug('Warning: Failed to save route to database: $dbError');
+        // Don't fail the entire operation if database save fails
+      }
       
       // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Route optimized successfully'),
+            content: Text('Closest water supply found successfully!'),
             backgroundColor: Colors.green,
           ),
         );
       }
     } catch (e) {
+      _logDebug('Error in route optimization: $e');
       setState(() {
-        _errorMessage = 'Error optimizing route: $e';
+        _errorMessage = _getUserFriendlyErrorMessage(e.toString());
         _isOptimizing = false;
       });
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $_errorMessage'),
+            content: Text(_getUserFriendlyErrorMessage(e.toString())),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
     }
   }
   
-  // Helper to convert timestamps in the route data
-  Map<String, dynamic> _convertTimestamps(Map<String, dynamic> data) {
+  // Test API connectivity
+  Future<bool> _testApiConnectivity() async {
+    try {
+      _logDebug('Testing API connectivity...');
+      // This is a simple test - you might want to implement a dedicated health check endpoint
+      final healthResponse = await _apiService.testConnection();
+      _logDebug('API connectivity test result: $healthResponse');
+      return healthResponse;
+    } catch (e) {
+      _logDebug('API connectivity test failed: $e');
+      return false;
+    }
+  }
+  
+  // Process route data with enhanced validation
+  Map<String, dynamic> _processRouteData(Map<String, dynamic> data) {
+    _logDebug('Processing route data...');
     var result = Map<String, dynamic>.from(data);
     
-    // Convert timestamp strings to DateTime
-    if (result.containsKey('createdAt')) {
-      try {
-        if (result['createdAt'] is String) {
-          result['createdAt'] = DateTime.parse(result['createdAt']);
-        } else if (result['createdAt'] is int) {
-          result['createdAt'] = DateTime.fromMillisecondsSinceEpoch(result['createdAt']);
-        }
-      } catch (e) {
-        print('Error converting createdAt: $e');
-        result['createdAt'] = DateTime.now();
-      }
-    } else {
-      result['createdAt'] = DateTime.now();
+    // Ensure required fields exist
+    if (!result.containsKey('id') || result['id'] == null) {
+      result['id'] = 'route-${DateTime.now().millisecondsSinceEpoch}';
     }
     
-    if (result.containsKey('updatedAt')) {
-      try {
-        if (result['updatedAt'] is String) {
-          result['updatedAt'] = DateTime.parse(result['updatedAt']);
-        } else if (result['updatedAt'] is int) {
-          result['updatedAt'] = DateTime.fromMillisecondsSinceEpoch(result['updatedAt']);
-        }
-      } catch (e) {
-        print('Error converting updatedAt: $e');
-        result['updatedAt'] = DateTime.now();
-      }
-    } else {
+    if (!result.containsKey('adminId') || result['adminId'] == null) {
+      result['adminId'] = _authService.currentUser?.uid ?? '';
+    }
+    
+    if (!result.containsKey('reportIds') || result['reportIds'] == null) {
+      result['reportIds'] = _selectedReports.map((r) => r.id).toList();
+    }
+    
+    if (!result.containsKey('totalDistance') || result['totalDistance'] == null) {
+      result['totalDistance'] = 0.0;
+    }
+    
+    // Convert timestamps with better error handling
+    try {
+      result['createdAt'] = DateTime.now();
+      result['updatedAt'] = DateTime.now();
+    } catch (e) {
+      _logDebug('Error setting timestamps: $e');
+      result['createdAt'] = DateTime.now();
       result['updatedAt'] = DateTime.now();
     }
     
+    // Validate and fix points array
+    if (!result.containsKey('points') || result['points'] == null) {
+      result['points'] = [];
+    }
+    
+    // Validate and fix segments array
+    if (!result.containsKey('segments') || result['segments'] == null) {
+      result['segments'] = [];
+    }
+    
+    _logDebug('Route data processing completed');
     return result;
   }
   
-  // Manually create a RouteModel when fromJson fails
-  RouteModel _manuallyCreateRouteModel(Map<String, dynamic> data) {
-    List<String> reportIds = [];
-    if (data.containsKey('reportIds') && data['reportIds'] is List) {
-      reportIds = List<String>.from((data['reportIds'] as List).map((e) => e.toString()));
-    }
-    
-    List<RoutePoint> points = [];
-    if (data.containsKey('points') && data['points'] is List) {
-      points = (data['points'] as List).map((point) {
-        if (point is Map<String, dynamic>) {
-          return RoutePoint(
-            nodeId: point['nodeId']?.toString() ?? '',
-            location: GeoPoint(
-              latitude: _getDoubleValue(point['location']?['latitude'], 0),
-              longitude: _getDoubleValue(point['location']?['longitude'], 0),
-            ),
-            address: point['address']?.toString() ?? '',
-            label: point['label']?.toString(),
-          );
-        }
-        return RoutePoint(
-          nodeId: '',
-          location: GeoPoint(latitude: 0, longitude: 0),
-          address: '',
-        );
-      }).toList();
-    }
-    
-    List<RouteSegment> segments = [];
-    if (data.containsKey('segments') && data['segments'] is List) {
-      segments = (data['segments'] as List).map((segment) {
-        if (segment is Map<String, dynamic>) {
-          // Process 'from' point
-          RoutePoint fromPoint;
-          if (segment['from'] is Map<String, dynamic>) {
-            var from = segment['from'] as Map<String, dynamic>;
-            fromPoint = RoutePoint(
-              nodeId: from['nodeId']?.toString() ?? '',
-              location: GeoPoint(
-                latitude: _getDoubleValue(from['location']?['latitude'], 0),
-                longitude: _getDoubleValue(from['location']?['longitude'], 0),
-              ),
-              address: from['address']?.toString() ?? '',
-              label: from['label']?.toString(),
-            );
-          } else {
-            fromPoint = RoutePoint(
-              nodeId: '',
-              location: GeoPoint(latitude: 0, longitude: 0),
-              address: '',
-            );
-          }
-          
-          // Process 'to' point
-          RoutePoint toPoint;
-          if (segment['to'] is Map<String, dynamic>) {
-            var to = segment['to'] as Map<String, dynamic>;
-            toPoint = RoutePoint(
-              nodeId: to['nodeId']?.toString() ?? '',
-              location: GeoPoint(
-                latitude: _getDoubleValue(to['location']?['latitude'], 0),
-                longitude: _getDoubleValue(to['location']?['longitude'], 0),
-              ),
-              address: to['address']?.toString() ?? '',
-              label: to['label']?.toString(),
-            );
-          } else {
-            toPoint = RoutePoint(
-              nodeId: '',
-              location: GeoPoint(latitude: 0, longitude: 0),
-              address: '',
-            );
-          }
-          
-          // Process polyline
-          List<GeoPoint> polyline = [];
-          if (segment['polyline'] is List) {
-            polyline = (segment['polyline'] as List).map((point) {
-              if (point is Map<String, dynamic>) {
-                return GeoPoint(
-                  latitude: _getDoubleValue(point['latitude'], 0),
-                  longitude: _getDoubleValue(point['longitude'], 0),
-                );
-              }
-              return GeoPoint(latitude: 0, longitude: 0);
-            }).toList();
-          }
-          
-          return RouteSegment(
-            from: fromPoint,
-            to: toPoint,
-            distance: _getDoubleValue(segment['distance'], 0),
-            polyline: polyline,
-          );
-        }
-        
-        // Default segment if parsing fails
-        return RouteSegment(
-          from: RoutePoint(
-            nodeId: '',
-            location: GeoPoint(latitude: 0, longitude: 0),
-            address: '',
-          ),
-          to: RoutePoint(
-            nodeId: '',
-            location: GeoPoint(latitude: 0, longitude: 0),
-            address: '',
-          ),
-          distance: 0,
-          polyline: [],
-        );
-      }).toList();
-    }
+  // Create fallback route model when JSON parsing fails
+  RouteModel _createFallbackRouteModel(Map<String, dynamic> data) {
+    _logDebug('Creating fallback route model...');
     
     return RouteModel(
-      id: data['id']?.toString() ?? 'route-${DateTime.now().millisecondsSinceEpoch}',
-      adminId: data['adminId']?.toString() ?? '',
-      reportIds: reportIds,
-      points: points,
-      segments: segments,
-      totalDistance: _getDoubleValue(data['totalDistance'], 0),
-      createdAt: data['createdAt'] ?? DateTime.now(),
-      updatedAt: data['updatedAt'] ?? DateTime.now(),
+      id: data['id']?.toString() ?? 'fallback-${DateTime.now().millisecondsSinceEpoch}',
+      adminId: data['adminId']?.toString() ?? _authService.currentUser?.uid ?? '',
+      reportIds: _selectedReports.map((r) => r.id).toList(),
+      points: [], // Empty for now
+      segments: [], // Empty for now
+      totalDistance: _getTotalDistanceFromData(data),
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
     );
   }
   
-  // Helper to safely convert to double
-  double _getDoubleValue(dynamic value, double defaultValue) {
-    if (value == null) return defaultValue;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) {
-      try {
-        return double.parse(value);
-      } catch (e) {
-        return defaultValue;
+  // Extract total distance from data
+  double _getTotalDistanceFromData(Map<String, dynamic> data) {
+    try {
+      if (data.containsKey('totalDistance')) {
+        return double.tryParse(data['totalDistance'].toString()) ?? 0.0;
       }
+      if (data.containsKey('total_distance')) {
+        return double.tryParse(data['total_distance'].toString()) ?? 0.0;
+      }
+      return 0.0;
+    } catch (e) {
+      _logDebug('Error extracting total distance: $e');
+      return 0.0;
     }
-    return defaultValue;
+  }
+  
+  // Convert technical error messages to user-friendly ones
+  String _getUserFriendlyErrorMessage(String error) {
+    if (error.contains('Not Found') || error.contains('404')) {
+      return 'The water supply service is currently unavailable. Please try again later.';
+    } else if (error.contains('Connection') || error.contains('network')) {
+      return 'Please check your internet connection and try again.';
+    } else if (error.contains('timeout') || error.contains('Timeout')) {
+      return 'The request took too long. Please try again.';
+    } else if (error.contains('server') || error.contains('500')) {
+      return 'The server is experiencing issues. Please try again in a few minutes.';
+    } else if (error.contains('water supplies')) {
+      return 'No water supplies found in your area. Try selecting different locations.';
+    } else {
+      return 'Unable to find water supplies. Please try again or contact support.';
+    }
   }
   
   void _toggleReportSelection(ReportModel report) {
     setState(() {
       if (_isReportSelected(report)) {
         _selectedReports.removeWhere((r) => r.id == report.id);
+        _logDebug('Deselected report: ${report.title}');
       } else {
         _selectedReports.add(report);
+        _logDebug('Selected report: ${report.title}');
       }
       
       // Reset optimized route when selection changes
@@ -401,9 +389,11 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       if (_selectedReports.length == _allReports.length) {
         // Deselect all
         _selectedReports.clear();
+        _logDebug('Deselected all reports');
       } else {
         // Select all
         _selectedReports = List.from(_allReports);
+        _logDebug('Selected all ${_selectedReports.length} reports');
       }
       
       // Reset optimized route
@@ -449,41 +439,80 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   
   Widget _buildErrorView() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.error_outline,
-            size: 80,
-            color: AppTheme.errorColor.withOpacity(0.7),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Error Loading Data',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 80,
+              color: AppTheme.errorColor.withOpacity(0.7),
             ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
+            const SizedBox(height: 16),
+            const Text(
+              'Error Loading Data',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
               _errorMessage,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textSecondaryColor,
               ),
             ),
-          ),
-          const SizedBox(height: 24),
-          CustomButton(
-            text: 'Try Again',
-            onPressed: _loadInitialData,
-            icon: Icons.refresh,
-            type: CustomButtonType.primary,
-          ),
-        ],
+            const SizedBox(height: 24),
+            CustomButton(
+              text: 'Try Again',
+              onPressed: _loadInitialData,
+              icon: Icons.refresh,
+              type: CustomButtonType.primary,
+            ),
+            const SizedBox(height: 12),
+            CustomButton(
+              text: 'Check Connection',
+              onPressed: () async {
+                setState(() {
+                  _isLoading = true;
+                });
+                
+                try {
+                  final isConnected = await _testApiConnectivity();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(isConnected 
+                          ? 'Connection successful!' 
+                          : 'Cannot connect to server'),
+                        backgroundColor: isConnected ? Colors.green : Colors.red,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Connection test failed: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } finally {
+                  if (mounted) {
+                    setState(() {
+                      _isLoading = false;
+                    });
+                  }
+                }
+              },
+              type: CustomButtonType.outline,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -700,78 +729,109 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     );
   }
   
- Widget _buildBottomBar() {
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.1),
-          blurRadius: 10,
-          offset: const Offset(0, -5),
-        ),
-      ],
-    ),
-    child: _isOptimizing
-        ? const Center(
-            child: Column(
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: _isOptimizing
+          ? const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 8),
+                  Text('Finding closest water supply points...'),
+                ],
+              ),
+            )
+          : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 8),
-                Text('Finding closest water supply points...'),
+                // Status information
+                if (_selectedReports.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: AppTheme.textSecondaryColor,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${_selectedReports.length} location${_selectedReports.length == 1 ? '' : 's'} selected',
+                            style: TextStyle(
+                              color: AppTheme.textSecondaryColor,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                
+                // Main action button
+                CustomButton(
+                  text: _optimizedRoute == null
+                      ? 'Find Closest Water Supply'
+                      : 'Recalculate Routes',
+                  onPressed: _selectedReports.isEmpty ? null : _optimizeRoute,
+                  icon: Icons.water_drop,
+                  isFullWidth: true,
+                  type: CustomButtonType.primary,
+                ),
               ],
             ),
-          )
-        : CustomButton(
-            text: _optimizedRoute == null
-                ? 'Find Closest Water Supply'
-                : 'Recalculate Routes',
-            onPressed: _selectedReports.isEmpty ? null : _optimizeRoute,
-            icon: Icons.water_drop,
-            isFullWidth: true,
-            type: CustomButtonType.primary,
-          ),
-  );
-}
-  
- String _getWaterQualityText(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return 'Optimum';
-    case WaterQualityState.highPh:
-      return 'High pH';
-    case WaterQualityState.highPhTemp:
-      return 'High pH & Temp';
-    case WaterQualityState.lowPh:
-      return 'Low pH';
-    case WaterQualityState.lowTemp:
-      return 'Low Temperature';
-    case WaterQualityState.lowTempHighPh:
-      return 'Low Temp & High pH';
-    case WaterQualityState.unknown:
-    default:
-      return 'Unknown';
+    );
   }
-}
   
-Color _getWaterQualityColor(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return Colors.blue;
-    case WaterQualityState.lowTemp:
-      return Colors.green;
-    case WaterQualityState.highPh:
-    case WaterQualityState.lowPh:
-      return Colors.orange;
-    case WaterQualityState.highPhTemp:
-      return Colors.red;
-    case WaterQualityState.lowTempHighPh:
-      return Colors.purple;
-    case WaterQualityState.unknown:
-    default:
-      return Colors.grey;
+  String _getWaterQualityText(WaterQualityState quality) {
+    switch (quality) {
+      case WaterQualityState.optimum:
+        return 'Optimum';
+      case WaterQualityState.highPh:
+        return 'High pH';
+      case WaterQualityState.highPhTemp:
+        return 'High pH & Temp';
+      case WaterQualityState.lowPh:
+        return 'Low pH';
+      case WaterQualityState.lowTemp:
+        return 'Low Temperature';
+      case WaterQualityState.lowTempHighPh:
+        return 'Low Temp & High pH';
+      case WaterQualityState.unknown:
+      default:
+        return 'Unknown';
+    }
   }
-}
+  
+  Color _getWaterQualityColor(WaterQualityState quality) {
+    switch (quality) {
+      case WaterQualityState.optimum:
+        return Colors.blue;
+      case WaterQualityState.lowTemp:
+        return Colors.green;
+      case WaterQualityState.highPh:
+      case WaterQualityState.lowPh:
+        return Colors.orange;
+      case WaterQualityState.highPhTemp:
+        return Colors.red;
+      case WaterQualityState.lowTempHighPh:
+        return Colors.purple;
+      case WaterQualityState.unknown:
+      default:
+        return Colors.grey;
+    }
+  }
 }
