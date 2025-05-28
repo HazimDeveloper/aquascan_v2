@@ -1,4 +1,4 @@
-// lib/screens/admin/route_optimization_screen.dart - FIXED VERSION
+// lib/screens/admin/route_optimization_screen.dart - ENHANCED VERSION
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:math';
@@ -24,6 +24,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   bool _isLoading = true;
   bool _isOptimizing = false;
   bool _showMap = true;
+  bool _showInstructions = true; // New: Show instructions
   List<ReportModel> _allReports = [];
   List<ReportModel> _selectedReports = [];
   RouteModel? _optimizedRoute;
@@ -32,6 +33,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  late Animation<double> _pulseAnimation; // New: For highlighting
   late AuthService _authService;
   late DatabaseService _databaseService;
   late LocationService _locationService;
@@ -59,7 +61,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     // Setup animations
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 2000),
     );
     
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -68,6 +70,17 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         curve: Curves.easeIn,
       ),
     );
+    
+    // New: Pulse animation for highlighting
+    _pulseAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeInOut,
+      ),
+    );
+    
+    // Start pulse animation
+    _animationController.repeat(reverse: true);
     
     // Load initial data
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -112,6 +125,9 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
           _isLoading = false;
         });
         
+        // Stop pulse animation and start fade animation
+        _animationController.stop();
+        _animationController.reset();
         _animationController.forward();
         _logDebug('Initial data loaded successfully');
       } else {
@@ -133,11 +149,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   Future<void> _optimizeRoute() async {
     if (_selectedReports.isEmpty) {
       _logDebug('No reports selected');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select at least one water point'),
-        ),
-      );
+      _showSelectionHelpDialog();
       return;
     }
     
@@ -154,6 +166,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     setState(() {
       _isOptimizing = true;
       _errorMessage = '';
+      _showInstructions = false; // Hide instructions when optimizing
     });
     
     try {
@@ -250,11 +263,103 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     }
   }
   
+  // NEW: Show help dialog when no reports are selected
+  void _showSelectionHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.help_outline, color: AppTheme.primaryColor),
+            SizedBox(width: 8),
+            Text('How to Select Reports'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'To find the closest water supply, you need to:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            _buildHelpStep(1, 'Tap on water report markers on the map'),
+            _buildHelpStep(2, 'Or use the list view to select reports'),
+            _buildHelpStep(3, 'Selected reports will be highlighted in blue'),
+            _buildHelpStep(4, 'Tap "Find Closest Water Supply" button'),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info, color: Colors.blue, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'The system will find the nearest water supply point to your selected locations.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Got it!'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildHelpStep(int number, String text) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                number.toString(),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
   // Test API connectivity
   Future<bool> _testApiConnectivity() async {
     try {
       _logDebug('Testing API connectivity...');
-      // This is a simple test - you might want to implement a dedicated health check endpoint
       final healthResponse = await _apiService.testConnection();
       _logDebug('API connectivity test result: $healthResponse');
       return healthResponse;
@@ -318,8 +423,8 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       id: data['id']?.toString() ?? 'fallback-${DateTime.now().millisecondsSinceEpoch}',
       adminId: data['adminId']?.toString() ?? _authService.currentUser?.uid ?? '',
       reportIds: _selectedReports.map((r) => r.id).toList(),
-      points: [], // Empty for now
-      segments: [], // Empty for now
+      points: [], 
+      segments: [], 
       totalDistance: _getTotalDistanceFromData(data),
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -371,6 +476,11 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       
       // Reset optimized route when selection changes
       _optimizedRoute = null;
+      
+      // Hide instructions once user starts selecting
+      if (_selectedReports.isNotEmpty) {
+        _showInstructions = false;
+      }
     });
   }
   
@@ -390,10 +500,12 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         // Deselect all
         _selectedReports.clear();
         _logDebug('Deselected all reports');
+        _showInstructions = true; // Show instructions again
       } else {
         // Select all
         _selectedReports = List.from(_allReports);
         _logDebug('Selected all ${_selectedReports.length} reports');
+        _showInstructions = false; // Hide instructions
       }
       
       // Reset optimized route
@@ -407,6 +519,13 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       appBar: AppBar(
         title: const Text('Closest Water Supply Finder'),
         actions: [
+          // Help button
+          IconButton(
+            icon: const Icon(Icons.help_outline),
+            onPressed: _showSelectionHelpDialog,
+            tooltip: 'How to use',
+          ),
+          
           // Toggle view button
           IconButton(
             icon: Icon(_showMap ? Icons.list : Icons.map),
@@ -430,10 +549,121 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
             )
           : _errorMessage.isNotEmpty
               ? _buildErrorView()
-              : _showMap
-                  ? _buildMapView()
-                  : _buildListView(),
+              : Stack(
+                  children: [
+                    // Main content
+                    _showMap ? _buildMapView() : _buildListView(),
+                    
+                    // NEW: Instructions overlay
+                    if (_showInstructions && !_isOptimizing)
+                      _buildInstructionsOverlay(),
+                  ],
+                ),
       bottomNavigationBar: _buildBottomBar(),
+    );
+  }
+  
+  // NEW: Instructions overlay
+  Widget _buildInstructionsOverlay() {
+    return Positioned(
+      top: 20,
+      left: 16,
+      right: 16,
+      child: AnimatedBuilder(
+        animation: _pulseAnimation,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _selectedReports.isEmpty ? _pulseAnimation.value : 1.0,
+            child: Card(
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              color: Colors.blue.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.touch_app,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Select Water Report Locations',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: () {
+                            setState(() {
+                              _showInstructions = false;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _showMap 
+                        ? '👆 Tap on the red warning markers on the map to select water report locations'
+                        : '👆 Use the checkboxes in the list to select water report locations',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.lightbulb_outline,
+                            color: Colors.blue.shade600,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Selected locations will turn blue. Then tap "Find Closest Water Supply"',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
   
@@ -642,8 +872,9 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Checkbox
-              Container(
+              // Checkbox with enhanced animation
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
@@ -756,41 +987,84 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Status information
+                // Status information with enhanced design
                 if (_selectedReports.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: 16,
-                          color: AppTheme.textSecondaryColor,
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            '${_selectedReports.length} location${_selectedReports.length == 1 ? '' : 's'} selected',
-                            style: TextStyle(
-                              color: AppTheme.textSecondaryColor,
-                              fontSize: 14,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_selectedReports.length} location${_selectedReports.length == 1 ? '' : 's'} selected',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade800,
+                                ),
+                              ),
+                              Text(
+                                'Ready to find closest water supply',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
                 
-                // Main action button
-                CustomButton(
-                  text: _optimizedRoute == null
-                      ? 'Find Closest Water Supply'
-                      : 'Recalculate Routes',
-                  onPressed: _selectedReports.isEmpty ? null : _optimizeRoute,
-                  icon: Icons.water_drop,
-                  isFullWidth: true,
-                  type: CustomButtonType.primary,
+                // Main action button with enhanced design
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  child: CustomButton(
+                    text: _optimizedRoute == null
+                        ? 'Find Closest Water Supply'
+                        : 'Recalculate Routes',
+                    onPressed: _selectedReports.isEmpty ? null : _optimizeRoute,
+                    icon: Icons.water_drop,
+                    isFullWidth: true,
+                    type: _selectedReports.isEmpty 
+                        ? CustomButtonType.outline 
+                        : CustomButtonType.primary,
+                  ),
                 ),
+                
+                // Helper text
+                if (_selectedReports.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Select water report locations first',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondaryColor,
+                      ),
+                    ),
+                  ),
               ],
             ),
     );
