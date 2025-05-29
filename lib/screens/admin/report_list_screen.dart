@@ -1,4 +1,4 @@
-// lib/screens/admin/report_list_screen.dart - COMPLETE ENHANCED VERSION
+// lib/screens/admin/report_list_screen.dart - COMPLETE VERSION
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -31,6 +31,7 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
   List<ReportModel> _resolvedReports = [];
   String _errorMessage = '';
   String _searchQuery = '';
+  String _selectedFilter = 'all'; // all, with_images, without_images, analyzed, not_analyzed
   
   // Map to store confidence scores for each report (only for reports with images)
   Map<String, double> _confidenceScores = {};
@@ -154,17 +155,42 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
   }
   
   List<ReportModel> _getFilteredReports(List<ReportModel> reports) {
-    if (_searchQuery.isEmpty) {
-      return reports;
+    List<ReportModel> filteredReports = reports;
+    
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      filteredReports = filteredReports.where((report) {
+        return report.title.toLowerCase().contains(query) ||
+               report.description.toLowerCase().contains(query) ||
+               report.address.toLowerCase().contains(query) ||
+               report.userName.toLowerCase().contains(query);
+      }).toList();
     }
     
-    final query = _searchQuery.toLowerCase();
-    return reports.where((report) {
-      return report.title.toLowerCase().contains(query) ||
-             report.description.toLowerCase().contains(query) ||
-             report.address.toLowerCase().contains(query) ||
-             report.userName.toLowerCase().contains(query);
-    }).toList();
+    // Apply category filter
+    switch (_selectedFilter) {
+      case 'with_images':
+        filteredReports = filteredReports.where((r) => r.imageUrls.isNotEmpty).toList();
+        break;
+      case 'without_images':
+        filteredReports = filteredReports.where((r) => r.imageUrls.isEmpty).toList();
+        break;
+      case 'analyzed':
+        filteredReports = filteredReports.where((r) => 
+          r.imageUrls.isNotEmpty && r.waterQuality != WaterQualityState.unknown).toList();
+        break;
+      case 'not_analyzed':
+        filteredReports = filteredReports.where((r) => 
+          r.imageUrls.isEmpty || r.waterQuality == WaterQualityState.unknown).toList();
+        break;
+      case 'all':
+      default:
+        // No additional filtering
+        break;
+    }
+    
+    return filteredReports;
   }
   
   @override
@@ -181,48 +207,82 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
           ),
           // Filter button
           PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list),
+            icon: Icon(
+              Icons.filter_list,
+              color: _selectedFilter != 'all' ? AppTheme.primaryColor : null,
+            ),
             onSelected: (value) {
-              // Handle filter selection
-              switch (value) {
-                case 'with_images':
-                  _filterReportsByImages(true);
-                  break;
-                case 'without_images':
-                  _filterReportsByImages(false);
-                  break;
-                case 'analyzed':
-                  _filterReportsByAnalysis(true);
-                  break;
-                case 'not_analyzed':
-                  _filterReportsByAnalysis(false);
-                  break;
-                case 'clear':
-                  _clearFilters();
-                  break;
-              }
+              setState(() {
+                _selectedFilter = value;
+              });
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
+              PopupMenuItem(
+                value: 'all',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.list,
+                      color: _selectedFilter == 'all' ? AppTheme.primaryColor : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('All Reports'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
                 value: 'with_images',
-                child: Text('With Images'),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.image,
+                      color: _selectedFilter == 'with_images' ? AppTheme.primaryColor : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('With Images'),
+                  ],
+                ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'without_images',
-                child: Text('Without Images'),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.image_not_supported,
+                      color: _selectedFilter == 'without_images' ? AppTheme.primaryColor : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('Without Images'),
+                  ],
+                ),
               ),
-              const PopupMenuItem(
+              const PopupMenuDivider(),
+              PopupMenuItem(
                 value: 'analyzed',
-                child: Text('AI Analyzed'),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.psychology,
+                      color: _selectedFilter == 'analyzed' ? AppTheme.primaryColor : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('AI Analyzed'),
+                  ],
+                ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'not_analyzed',
-                child: Text('Not Analyzed'),
-              ),
-            
-              const PopupMenuItem(
-                value: 'clear',
-                child: Text('Clear Filters'),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.help_outline,
+                      color: _selectedFilter == 'not_analyzed' ? AppTheme.primaryColor : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('Not Analyzed'),
+                  ],
+                ),
               ),
             ],
           ),
@@ -236,7 +296,7 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
                 children: [
                   Icon(Icons.pending_actions, size: 16),
                   SizedBox(width: 4),
-                  Text('Pending (${_pendingReports.length})'),
+                  Text('Pending (${_getFilteredReports(_pendingReports).length})'),
                 ],
               ),
             ),
@@ -246,7 +306,7 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
                 children: [
                   Icon(Icons.check_circle, size: 16),
                   SizedBox(width: 4),
-                  Text('Resolved (${_resolvedReports.length})'),
+                  Text('Resolved (${_getFilteredReports(_resolvedReports).length})'),
                 ],
               ),
             ),
@@ -266,31 +326,74 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
                     // Search bar
                     Padding(
                       padding: const EdgeInsets.all(16),
-                      child: TextField(
-                        decoration: InputDecoration(
-                          hintText: 'Search reports by title, description, location, or reporter',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () {
-                                    setState(() {
-                                      _searchQuery = '';
-                                    });
-                                  },
-                                )
-                              : null,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: InputDecoration(
+                                hintText: 'Search reports...',
+                                prefixIcon: const Icon(Icons.search),
+                                suffixIcon: _searchQuery.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          setState(() {
+                                            _searchQuery = '';
+                                          });
+                                        },
+                                      )
+                                    : null,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.grey.shade50,
+                              ),
+                              onChanged: (value) {
+                                setState(() {
+                                  _searchQuery = value;
+                                });
+                              },
+                            ),
                           ),
-                          filled: true,
-                          fillColor: Colors.grey.shade50,
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value;
-                          });
-                        },
+                          if (_selectedFilter != 'all') ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: AppTheme.primaryColor),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _getFilterDisplayName(_selectedFilter),
+                                    style: TextStyle(
+                                      color: AppTheme.primaryColor,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedFilter = 'all';
+                                      });
+                                    },
+                                    child: Icon(
+                                      Icons.close,
+                                      size: 16,
+                                      color: AppTheme.primaryColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                     
@@ -315,22 +418,63 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
     );
   }
   
+  String _getFilterDisplayName(String filter) {
+    switch (filter) {
+      case 'with_images':
+        return 'With Images';
+      case 'without_images':
+        return 'No Images';
+      case 'analyzed':
+        return 'AI Analyzed';
+      case 'not_analyzed':
+        return 'Not Analyzed';
+      default:
+        return 'All';
+    }
+  }
+  
   Widget _buildStatisticsBar() {
-    final totalReports = _pendingReports.length + _resolvedReports.length;
-    final reportsWithImages = [..._pendingReports, ..._resolvedReports]
-        .where((r) => r.imageUrls.isNotEmpty).length;
-    final analyzedReports = [..._pendingReports, ..._resolvedReports]
-        .where((r) => r.imageUrls.isNotEmpty && r.waterQuality != WaterQualityState.unknown).length;
+    final allReports = [..._pendingReports, ..._resolvedReports];
+    final filteredReports = _getFilteredReports(allReports);
+    final totalReports = allReports.length;
+    final reportsWithImages = allReports.where((r) => r.imageUrls.isNotEmpty).length;
+    final analyzedReports = allReports.where((r) => 
+      r.imageUrls.isNotEmpty && r.waterQuality != WaterQualityState.unknown).length;
     
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: Colors.grey.shade50,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+      child: Column(
         children: [
-          _buildStatItem('Total', totalReports, Icons.assignment, Colors.blue),
-          _buildStatItem('With Images', reportsWithImages, Icons.image, Colors.green),
-          _buildStatItem('AI Analyzed', analyzedReports, Icons.psychology, Colors.purple),
+          // Main stats
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildStatItem('Total', totalReports, Icons.assignment, Colors.blue),
+              _buildStatItem('With Images', reportsWithImages, Icons.image, Colors.green),
+              _buildStatItem('AI Analyzed', analyzedReports, Icons.psychology, Colors.purple),
+            ],
+          ),
+          
+          // Filter results
+          if (_searchQuery.isNotEmpty || _selectedFilter != 'all') ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'Showing ${filteredReports.length} report${filteredReports.length == 1 ? '' : 's'}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primaryColor,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -362,34 +506,6 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
           ),
         ),
       ],
-    );
-  }
-  
-  void _filterReportsByImages(bool hasImages) {
-    // This is a simple implementation - in a real app you might want more sophisticated filtering
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(hasImages ? 'Showing reports with images' : 'Showing reports without images'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-  
-  void _filterReportsByAnalysis(bool isAnalyzed) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(isAnalyzed ? 'Showing AI analyzed reports' : 'Showing non-analyzed reports'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-  
-  void _clearFilters() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Filters cleared'),
-        duration: Duration(seconds: 1),
-      ),
     );
   }
   
@@ -449,9 +565,11 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
             ),
             const SizedBox(height: 16),
             Text(
-              isPending
-                  ? 'No Pending Reports'
-                  : 'No Resolved Reports',
+              _searchQuery.isNotEmpty || _selectedFilter != 'all'
+                  ? 'No matching reports'
+                  : isPending
+                      ? 'No Pending Reports'
+                      : 'No Resolved Reports',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -459,8 +577,8 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
             ),
             const SizedBox(height: 8),
             Text(
-              _searchQuery.isNotEmpty
-                  ? 'No reports match your search'
+              _searchQuery.isNotEmpty || _selectedFilter != 'all'
+                  ? 'Try adjusting your search or filter'
                   : isPending
                       ? 'All reports have been resolved'
                       : 'Resolved reports will appear here',
@@ -468,15 +586,16 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
                 color: AppTheme.textSecondaryColor,
               ),
             ),
-            if (_searchQuery.isNotEmpty) ...[
+            if (_searchQuery.isNotEmpty || _selectedFilter != 'all') ...[
               const SizedBox(height: 16),
               TextButton(
                 onPressed: () {
                   setState(() {
                     _searchQuery = '';
+                    _selectedFilter = 'all';
                   });
                 },
-                child: const Text('Clear Search'),
+                child: const Text('Clear Filters'),
               ),
             ],
           ],
@@ -1445,7 +1564,7 @@ class _ReportListScreenState extends State<ReportListScreen> with SingleTickerPr
               children: [
                 Icon(Icons.check_circle, color: Colors.white),
                 SizedBox(width: 8),
-                Text('Report "${report.title}" marked as resolved'),
+                Expanded(child: Text('Report "${report.title}" marked as resolved')),
               ],
             ),
             backgroundColor: Colors.green,

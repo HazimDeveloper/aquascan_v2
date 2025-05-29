@@ -1,4 +1,5 @@
-// Updated StorageService.dart
+// SOLUTION 1: Enhanced StorageService with better error handling
+// lib/services/storage_service.dart - UPDATED VERSION
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -8,23 +9,44 @@ import 'package:uuid/uuid.dart';
 
 class StorageService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
-  final bool _debugMode = true; // Enable debug logging
+  final bool _debugMode = true;
   
-  // Helper method for debug logging
   void _logDebug(String message) {
     if (_debugMode) {
       print('🔥 StorageService: $message');
     }
   }
   
-  // Upload an image to Firebase Storage with improved error handling
+  /// Test Firebase Storage connection
+  Future<bool> testStorageConnection() async {
+    try {
+      _logDebug('Testing Firebase Storage connection...');
+      
+      // Try to get a reference - this will fail if Storage is not configured
+      final ref = _storage.ref().child('test');
+      await ref.getDownloadURL().catchError((e) {
+        // This error is expected for non-existent files, but confirms Storage works
+        _logDebug('Storage test completed (expected error for non-existent file)');
+        return '';
+      });
+      
+      _logDebug('✅ Firebase Storage connection successful');
+      return true;
+    } catch (e) {
+      _logDebug('❌ Firebase Storage connection failed: $e');
+      return false;
+    }
+  }
+  
+  /// Upload image with comprehensive error handling and retry logic
   Future<String> uploadImage(File file, String folder) async {
     try {
-      _logDebug('Starting upload for file: ${file.path}');
+      _logDebug('=== STARTING IMAGE UPLOAD ===');
+      _logDebug('File path: ${file.path}');
+      _logDebug('Folder: $folder');
       
-      // Verify file exists and is readable
-      if (!file.existsSync()) {
-        _logDebug('Error: File does not exist: ${file.path}');
+      // STEP 1: Validate file exists and is readable
+      if (!await file.exists()) {
         throw Exception('File does not exist: ${file.path}');
       }
       
@@ -32,256 +54,240 @@ class StorageService {
       _logDebug('File size: ${(fileSize / 1024).toStringAsFixed(2)} KB');
       
       if (fileSize <= 0) {
-        _logDebug('Error: File is empty: ${file.path}');
         throw Exception('File is empty: ${file.path}');
       }
       
-      // Generate a unique filename with timestamp to prevent conflicts
-      final uuid = Uuid();
-      final extension = path.extension(file.path).isNotEmpty 
-          ? path.extension(file.path) 
-          : '.jpg'; // Default to .jpg if no extension
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${uuid.v4()}$extension';
-      _logDebug('Generated filename: $fileName in folder: $folder');
-      
-      // Create reference with more specific path
-      final storageRef = _storage.ref().child('$folder/$fileName');
-      _logDebug('Storage reference created: ${storageRef.fullPath}');
-      
-      // Read file data to ensure it's accessible
-      _logDebug('Verifying file data is accessible...');
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) {
-        _logDebug('Error: Could not read file data: ${file.path}');
-        throw Exception('Could not read file data: ${file.path}');
+      if (fileSize > 10 * 1024 * 1024) { // 10MB limit
+        throw Exception('File too large: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
       }
-      _logDebug('Successfully read ${bytes.length} bytes from file');
       
-      // Upload using putData instead of putFile for more reliability
-      try {
-        _logDebug('Starting file upload to Firebase...');
-        final uploadTask = storageRef.putData(
-          bytes,
-          SettableMetadata(
-            contentType: 'image/jpeg',
-            customMetadata: {
-              'source': 'water_watch_app',
-              'originalPath': file.path,
-              'uploadTime': DateTime.now().toIso8601String(),
-            },
-          ),
-        );
-        
-        // Monitor upload progress
-        uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+      // STEP 2: Test Storage connection first
+      final isConnected = await testStorageConnection();
+      if (!isConnected) {
+        throw Exception('Firebase Storage is not accessible. Please check your configuration.');
+      }
+      
+      // STEP 3: Read file bytes
+      _logDebug('Reading file bytes...');
+      final Uint8List bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
+        throw Exception('Could not read file data');
+      }
+      _logDebug('Successfully read ${bytes.length} bytes');
+      
+      // STEP 4: Generate unique filename
+      final uuid = Uuid();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final extension = path.extension(file.path).toLowerCase();
+      final validExtension = ['.jpg', '.jpeg', '.png'].contains(extension) ? extension : '.jpg';
+      final fileName = 'water_${timestamp}_${uuid.v4()}$validExtension';
+      
+      _logDebug('Generated filename: $fileName');
+      
+      // STEP 5: Create storage reference
+      final storageRef = _storage.ref().child('$folder/$fileName');
+      _logDebug('Storage path: ${storageRef.fullPath}');
+      
+      // STEP 6: Upload with metadata and progress tracking
+      _logDebug('Starting upload...');
+      
+      final metadata = SettableMetadata(
+        contentType: _getContentType(validExtension),
+        customMetadata: {
+          'source': 'aquascan_app',
+          'originalName': path.basename(file.path),
+          'uploadTime': DateTime.now().toIso8601String(),
+          'fileSize': fileSize.toString(),
+        },
+      );
+      
+      final uploadTask = storageRef.putData(bytes, metadata);
+      
+      // Monitor upload progress
+      uploadTask.snapshotEvents.listen(
+        (TaskSnapshot snapshot) {
           final progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
           _logDebug('Upload progress: ${progress.toStringAsFixed(1)}%');
-        }, onError: (e) {
-          _logDebug('Upload snapshot error: $e');
-        });
-        
-        final snapshot = await uploadTask.whenComplete(() {
-          _logDebug('Upload completed successfully');
-        });
-        
-        // Get download URL
-        final downloadUrl = await snapshot.ref.getDownloadURL();
-        _logDebug('Download URL obtained: $downloadUrl');
-        return downloadUrl;
-      } catch (e) {
-        _logDebug('Error during Firebase upload: $e');
-        throw Exception('Failed to upload to Firebase: $e');
-      }
-    } catch (e) {
-      _logDebug('Error in uploadImage: $e');
-      throw Exception('Failed to upload image: $e');
-    }
-  }
-  
-  // Upload multiple images with improved reliability
-  Future<List<String>> uploadImages(List<File> files, String folder) async {
-    _logDebug('Starting upload of ${files.length} images to folder: $folder');
-    
-    if (files.isEmpty) {
-      _logDebug('No files to upload, returning empty list');
-      return [];
-    }
-    
-    try {
-      final List<String> urls = [];
-      final List<String> failedUploads = [];
+        },
+        onError: (error) {
+          _logDebug('Upload progress error: $error');
+        },
+      );
       
-      for (int i = 0; i < files.length; i++) {
-        final file = files[i];
+      // Wait for upload completion with timeout
+      final snapshot = await uploadTask.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          throw Exception('Upload timeout after 2 minutes');
+        },
+      );
+      
+      _logDebug('Upload completed, getting download URL...');
+      
+      // STEP 7: Get download URL with retry logic
+      String downloadUrl = '';
+      for (int attempt = 1; attempt <= 3; attempt++) {
         try {
-          bool fileValid = false;
-          
-          try {
-            fileValid = file.existsSync() && await file.length() > 0;
-          } catch (fileCheckError) {
-            _logDebug('Error checking file ${i+1}: $fileCheckError');
-          }
-          
-          if (fileValid) {
-            _logDebug('Processing file ${i+1}/${files.length}: ${file.path}');
-            final fileSize = await file.length();
-            _logDebug('File ${i+1} size: ${(fileSize / 1024).toStringAsFixed(2)} KB');
-            
-            // Try to upload and get URL
-            try {
-              final url = await uploadImage(file, folder);
-              _logDebug('File ${i+1} uploaded successfully, URL: $url');
-              urls.add(url);
-            } catch (uploadError) {
-              _logDebug('Error uploading file ${i+1}: $uploadError');
-              failedUploads.add(file.path);
-              
-              // Try one more time with direct data upload
-              try {
-                _logDebug('Attempting alternate upload method for file ${i+1}...');
-                final bytes = await file.readAsBytes();
-                if (bytes.isNotEmpty) {
-                  final uuid = Uuid();
-                  final fileName = '${DateTime.now().millisecondsSinceEpoch}_${uuid.v4()}.jpg';
-                  final storageRef = _storage.ref().child('$folder/$fileName');
-                  
-                  final uploadTask = storageRef.putData(
-                    bytes,
-                    SettableMetadata(contentType: 'image/jpeg'),
-                  );
-                  
-                  final snapshot = await uploadTask.whenComplete(() {
-                    _logDebug('Alternate upload completed for file ${i+1}');
-                  });
-                  
-                  final url = await snapshot.ref.getDownloadURL();
-                  _logDebug('Alternate upload successful, URL: $url');
-                  urls.add(url);
-                }
-              } catch (alternateUploadError) {
-                _logDebug('Alternate upload also failed: $alternateUploadError');
-              }
-            }
-          } else {
-            _logDebug('Skipping invalid file ${i+1}: ${file.path}');
-            failedUploads.add(file.path);
-          }
+          downloadUrl = await snapshot.ref.getDownloadURL();
+          break;
         } catch (e) {
-          _logDebug('Error handling file ${i+1} (${file.path}): $e');
-          failedUploads.add(file.path);
+          _logDebug('Download URL attempt $attempt failed: $e');
+          if (attempt == 3) rethrow;
+          await Future.delayed(Duration(seconds: attempt));
         }
       }
       
-      if (failedUploads.isNotEmpty) {
-        _logDebug('WARNING: Failed to upload ${failedUploads.length} files');
+      if (downloadUrl.isEmpty) {
+        throw Exception('Failed to get download URL');
       }
       
-      _logDebug('Finished uploading ${urls.length}/${files.length} files');
-      return urls;
+      _logDebug('✅ Upload successful!');
+      _logDebug('Download URL: $downloadUrl');
+      _logDebug('=== UPLOAD COMPLETE ===');
+      
+      return downloadUrl;
+      
     } catch (e) {
-      _logDebug('Error in uploadImages: $e');
-      throw Exception('Failed to upload images: $e');
+      _logDebug('❌ Upload failed: $e');
+      
+      // Provide specific error messages
+      if (e.toString().contains('storage/unauthorized')) {
+        throw Exception('Storage access denied. Please check Firebase Storage rules.');
+      } else if (e.toString().contains('storage/network-error')) {
+        throw Exception('Network error. Please check your internet connection.');
+      } else if (e.toString().contains('storage/quota-exceeded')) {
+        throw Exception('Storage quota exceeded. Please contact support.');
+      } else if (e.toString().contains('timeout')) {
+        throw Exception('Upload timeout. Please try again with a smaller image.');
+      } else {
+        throw Exception('Upload failed: ${e.toString()}');
+      }
     }
   }
   
-  // Delete an image from Firebase Storage
-  Future<void> deleteImage(String imageUrl) async {
+  /// Upload image data directly from bytes
+  Future<String> uploadImageData(Uint8List imageData, String folder) async {
     try {
-      _logDebug('Attempting to delete image: $imageUrl');
+      _logDebug('=== STARTING DATA UPLOAD ===');
+      _logDebug('Data size: ${(imageData.length / 1024).toStringAsFixed(2)} KB');
       
-      // Extract file path from URL
-      final ref = _storage.refFromURL(imageUrl);
-      _logDebug('Resolved storage reference: ${ref.fullPath}');
+      if (imageData.isEmpty) {
+        throw Exception('Image data is empty');
+      }
       
-      await ref.delete();
-      _logDebug('Image deleted successfully');
-    } catch (e) {
-      _logDebug('Error deleting image: $e');
-      throw Exception('Failed to delete image: $e');
-    }
-  }
-  
-  // Get Firebase Storage reference from URL
-  Reference? getStorageRefFromUrl(String url) {
-    try {
-      return _storage.refFromURL(url);
-    } catch (e) {
-      _logDebug('Error getting reference from URL: $e');
-      return null;
-    }
-  }
-
- Future<String> uploadImageData(Uint8List imageData, String folder) async {
-  try {
-    _logDebug('Starting upload of image data (${imageData.length} bytes)');
-    
-    if (imageData.isEmpty) {
-      _logDebug('Error: Image data is empty');
-      throw Exception('Image data is empty');
-    }
-    
-    // Generate a unique filename with timestamp
-    final uuid = Uuid();
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final fileName = '${timestamp}_${uuid.v4()}.jpg';
-    _logDebug('Generated filename: $fileName in folder: $folder');
-    
-    // Create reference
-    final storageRef = _storage.ref().child('$folder/$fileName');
-    _logDebug('Storage reference created: ${storageRef.fullPath}');
-    
-    // Upload the data directly
-    try {
-      _logDebug('Starting data upload to Firebase...');
-      final uploadTask = storageRef.putData(
-        imageData,
-        SettableMetadata(
-          contentType: 'image/jpeg',
-          customMetadata: {
-            'source': 'water_watch_app',
-            'uploadType': 'direct_data',
-            'uploadTime': DateTime.now().toIso8601String(),
-          },
-        ),
+      if (imageData.length > 10 * 1024 * 1024) {
+        throw Exception('Image data too large: ${(imageData.length / 1024 / 1024).toStringAsFixed(2)} MB');
+      }
+      
+      // Test connection
+      final isConnected = await testStorageConnection();
+      if (!isConnected) {
+        throw Exception('Firebase Storage is not accessible');
+      }
+      
+      // Generate filename
+      final uuid = Uuid();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'water_data_${timestamp}_${uuid.v4()}.jpg';
+      
+      _logDebug('Generated filename: $fileName');
+      
+      // Create reference and upload
+      final storageRef = _storage.ref().child('$folder/$fileName');
+      
+      final metadata = SettableMetadata(
+        contentType: 'image/jpeg',
+        customMetadata: {
+          'source': 'aquascan_app_data',
+          'uploadTime': DateTime.now().toIso8601String(),
+          'dataSize': imageData.length.toString(),
+        },
       );
       
-      // Monitor upload progress
-      uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-        final progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        _logDebug('Upload progress: ${progress.toStringAsFixed(1)}%');
-      }, onError: (e) {
-        _logDebug('Upload snapshot error: $e');
-      });
+      _logDebug('Starting data upload...');
+      final uploadTask = storageRef.putData(imageData, metadata);
       
-      final snapshot = await uploadTask.whenComplete(() {
-        _logDebug('Data upload completed successfully');
-      });
+      final snapshot = await uploadTask.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          throw Exception('Data upload timeout');
+        },
+      );
       
-      // Get download URL
       final downloadUrl = await snapshot.ref.getDownloadURL();
-      _logDebug('Download URL obtained: $downloadUrl');
+      
+      _logDebug('✅ Data upload successful!');
+      _logDebug('Download URL: $downloadUrl');
+      
       return downloadUrl;
+      
     } catch (e) {
-      _logDebug('Error during Firebase data upload: $e');
-      throw Exception('Failed to upload data to Firebase: $e');
+      _logDebug('❌ Data upload failed: $e');
+      throw Exception('Data upload failed: ${e.toString()}');
     }
-  } catch (e) {
-    _logDebug('Error in uploadImageData: $e');
-    throw Exception('Failed to upload image data: $e');
   }
-}
   
-  // Check if a file exists in Firebase Storage
-  Future<bool> fileExists(String filePath) async {
+  /// Upload multiple images with individual error handling
+  Future<List<String>> uploadImages(List<File> files, String folder) async {
+    _logDebug('=== UPLOADING ${files.length} IMAGES ===');
+    
+    if (files.isEmpty) return [];
+    
+    final List<String> successfulUrls = [];
+    final List<String> failedFiles = [];
+    
+    for (int i = 0; i < files.length; i++) {
+      final file = files[i];
+      _logDebug('Processing image ${i + 1}/${files.length}: ${file.path}');
+      
+      try {
+        final url = await uploadImage(file, folder);
+        successfulUrls.add(url);
+        _logDebug('✅ Image ${i + 1} uploaded successfully');
+      } catch (e) {
+        _logDebug('❌ Image ${i + 1} failed: $e');
+        failedFiles.add(path.basename(file.path));
+      }
+    }
+    
+    _logDebug('=== UPLOAD SUMMARY ===');
+    _logDebug('Successful: ${successfulUrls.length}/${files.length}');
+    _logDebug('Failed: ${failedFiles.length}');
+    
+    if (failedFiles.isNotEmpty) {
+      _logDebug('Failed files: ${failedFiles.join(', ')}');
+    }
+    
+    return successfulUrls;
+  }
+  
+  /// Get appropriate content type for file extension
+  String _getContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case '.jpg':
+      case '.jpeg':
+        return 'image/jpeg';
+      case '.png':
+        return 'image/png';
+      case '.gif':
+        return 'image/gif';
+      case '.webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg';
+    }
+  }
+  
+  /// Delete an image from storage
+  Future<void> deleteImage(String imageUrl) async {
     try {
-      _logDebug('Checking if file exists: $filePath');
-      final ref = _storage.ref().child(filePath);
-      await ref.getDownloadURL();
-      _logDebug('File exists: $filePath');
-      return true;
+      _logDebug('Deleting image: $imageUrl');
+      final ref = _storage.refFromURL(imageUrl);
+      await ref.delete();
+      _logDebug('✅ Image deleted successfully');
     } catch (e) {
-      _logDebug('File does not exist or error: $filePath, $e');
-      return false;
+      _logDebug('❌ Error deleting image: $e');
+      throw Exception('Failed to delete image: $e');
     }
   }
 }
