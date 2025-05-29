@@ -1,4 +1,4 @@
-// lib/screens/admin/route_optimization_screen.dart - FIXED VERSION
+// lib/screens/admin/route_optimization_screen.dart - ENHANCED with GA Parameters
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:math';
@@ -24,11 +24,26 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   bool _isLoading = true;
   bool _isOptimizing = false;
   bool _showMap = true;
+  bool _showAdvancedSettings = false;
   List<ReportModel> _allReports = [];
   List<ReportModel> _selectedReports = [];
   RouteModel? _optimizedRoute;
   GeoPoint? _currentLocation;
   String _errorMessage = '';
+  
+  // Genetic Algorithm Parameters (matching Python system_tester)
+  int _populationSize = 50;
+  int _generations = 100;
+  double _mutationRate = 0.1;
+  double _crossoverRate = 0.8;
+  int _maxPoints = 8;
+  
+  // GA Results tracking
+  double? _bestFitness;
+  double? _averageFitness;
+  int? _completedGenerations;
+  String? _algorithmDetails;
+  List<double> _fitnessHistory = [];
   
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -154,10 +169,21 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     setState(() {
       _isOptimizing = true;
       _errorMessage = '';
+      _bestFitness = null;
+      _averageFitness = null;
+      _completedGenerations = null;
+      _algorithmDetails = null;
+      _fitnessHistory.clear();
     });
     
     try {
-      _logDebug('Starting route optimization...');
+      _logDebug('Starting GA route optimization...');
+      _logDebug('GA Parameters:');
+      _logDebug('  Population Size: $_populationSize');
+      _logDebug('  Generations: $_generations');
+      _logDebug('  Mutation Rate: $_mutationRate');
+      _logDebug('  Crossover Rate: $_crossoverRate');
+      _logDebug('  Max Points: $_maxPoints');
       _logDebug('Selected reports: ${_selectedReports.length}');
       _logDebug('Current location: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
       _logDebug('Admin ID: ${_authService.currentUser!.uid}');
@@ -177,20 +203,23 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         throw Exception('Cannot connect to the route optimization service. Please check your internet connection.');
       }
       
-      // Call API to optimize route
-      _logDebug('Calling API service for route optimization...');
-      final routeData = await _apiService.getOptimizedRoute(
+      // Call API to optimize route with GA parameters
+      _logDebug('Calling API service for GA route optimization...');
+      final routeData = await _getOptimizedRouteWithGA(
         _selectedReports,
         _currentLocation!,
         _authService.currentUser!.uid,
       );
       
-      _logDebug('Received route data from API');
+      _logDebug('Received route data from GA API');
       _logDebug('Route data keys: ${routeData.keys.toList()}');
       
       // Process API response with enhanced error handling
       final processedData = _processRouteData(routeData);
       _logDebug('Route data processed successfully');
+      
+      // Extract GA-specific results
+      _extractGAResults(routeData);
       
       // Create RouteModel with comprehensive error handling
       RouteModel optimizedRoute;
@@ -222,17 +251,28 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         // Don't fail the entire operation if database save fails
       }
       
-      // Show success message
+      // Show success message with GA results
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Closest water supply found successfully!'),
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('GA Route optimization completed!'),
+                if (_bestFitness != null)
+                  Text('Best Fitness: ${_bestFitness!.toStringAsFixed(4)}'),
+                if (_completedGenerations != null)
+                  Text('Generations: $_completedGenerations/$_generations'),
+              ],
+            ),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
-      _logDebug('Error in route optimization: $e');
+      _logDebug('Error in GA route optimization: $e');
       setState(() {
         _errorMessage = _getUserFriendlyErrorMessage(e.toString());
         _isOptimizing = false;
@@ -250,11 +290,96 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     }
   }
   
+  // Enhanced GA route optimization call with proper API integration
+  Future<Map<String, dynamic>> _getOptimizedRouteWithGA(
+    List<ReportModel> reports,
+    GeoPoint startLocation,
+    String adminId,
+  ) async {
+    // Build GA configuration from UI parameters
+    final gaParams = GAParameters(
+      populationSize: _populationSize,
+      maxGenerations: _generations,
+      mutationRate: _mutationRate,
+      crossoverRate: _crossoverRate,
+      maxRouteLength: _maxPoints,
+      timeLimit: 60.0, // Give more time for complex optimizations
+      convergenceThreshold: 15,
+      eliteSize: (_populationSize * 0.1).round(), // 10% elite
+      tournamentSize: 3,
+    );
+    
+    _logDebug('Calling enhanced API service with GA parameters:');
+    _logDebug('  Population Size: ${gaParams.populationSize}');
+    _logDebug('  Generations: ${gaParams.maxGenerations}');
+    _logDebug('  Mutation Rate: ${gaParams.mutationRate}');
+    _logDebug('  Crossover Rate: ${gaParams.crossoverRate}');
+    _logDebug('  Max Points: ${gaParams.maxRouteLength}');
+    _logDebug('  Time Limit: ${gaParams.timeLimit}');
+    
+    // Call the enhanced API service method
+    final response = await _apiService.getOptimizedRouteWithGA(
+      reports,
+      startLocation,
+      adminId,
+      gaParams,
+    );
+    
+    return response;
+  }
+  
+  // Extract GA-specific results from the API response
+  void _extractGAResults(Map<String, dynamic> routeData) {
+    try {
+      // Extract optimization stats
+      if (routeData.containsKey('optimization_stats')) {
+        final stats = routeData['optimization_stats'] as Map<String, dynamic>;
+        
+        _bestFitness = stats['best_fitness']?.toDouble();
+        _averageFitness = stats['average_fitness']?.toDouble();
+        _completedGenerations = stats['generations_completed']?.toInt();
+        
+        // Extract fitness history if available
+        if (stats.containsKey('fitness_history') && stats['fitness_history'] is List) {
+          _fitnessHistory = (stats['fitness_history'] as List)
+              .map((e) => (e as num).toDouble())
+              .toList();
+        }
+      }
+      
+      // Extract algorithm details
+      if (routeData.containsKey('algorithm_details')) {
+        final details = routeData['algorithm_details'] as Map<String, dynamic>;
+        
+        final populationSize = details['population_size'] ?? _populationSize;
+        final generations = details['generations_completed'] ?? _completedGenerations ?? 0;
+        final evaluations = details['evaluations_performed'] ?? 0;
+        final convergenceStatus = details['convergence_status'] ?? 'completed';
+        
+        _algorithmDetails = 'Pop: $populationSize, Gen: $generations, Eval: $evaluations, Status: $convergenceStatus';
+      }
+      
+      // Extract fitness score from route if available
+      if (routeData.containsKey('fitness_score')) {
+        _bestFitness = routeData['fitness_score']?.toDouble();
+      }
+      
+      _logDebug('GA Results extracted:');
+      _logDebug('  Best Fitness: $_bestFitness');
+      _logDebug('  Average Fitness: $_averageFitness');
+      _logDebug('  Completed Generations: $_completedGenerations');
+      _logDebug('  Fitness History Length: ${_fitnessHistory.length}');
+      _logDebug('  Algorithm Details: $_algorithmDetails');
+      
+    } catch (e) {
+      _logDebug('Error extracting GA results: $e');
+    }
+  }
+  
   // Test API connectivity
   Future<bool> _testApiConnectivity() async {
     try {
       _logDebug('Testing API connectivity...');
-      // This is a simple test - you might want to implement a dedicated health check endpoint
       final healthResponse = await _apiService.testConnection();
       _logDebug('API connectivity test result: $healthResponse');
       return healthResponse;
@@ -371,7 +496,16 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       
       // Reset optimized route when selection changes
       _optimizedRoute = null;
+      _resetGAResults();
     });
+  }
+  
+  void _resetGAResults() {
+    _bestFitness = null;
+    _averageFitness = null;
+    _completedGenerations = null;
+    _algorithmDetails = null;
+    _fitnessHistory.clear();
   }
   
   bool _isReportSelected(ReportModel report) {
@@ -398,14 +532,114 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       
       // Reset optimized route
       _optimizedRoute = null;
+      _resetGAResults();
     });
+  }
+  
+  void _showFitnessEvolutionChart() {
+    if (_fitnessHistory.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No fitness evolution data available. Please run optimization first.'),
+        ),
+      );
+      return;
+    }
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.9,
+          height: MediaQuery.of(context).size.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const Text(
+                'Fitness Evolution',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _buildFitnessChart(),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      Text(
+                        'Best Fitness',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      Text(
+                        _bestFitness?.toStringAsFixed(4) ?? 'N/A',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        'Generations',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      Text(
+                        '${_completedGenerations ?? 0}/$_generations',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildFitnessChart() {
+    if (_fitnessHistory.isEmpty) {
+      return const Center(
+        child: Text('No fitness data available'),
+      );
+    }
+    
+    return CustomPaint(
+      size: Size.infinite,
+      painter: FitnessChartPainter(_fitnessHistory),
+    );
   }
   
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Closest Water Supply Finder'),
+        title: const Text('GA Route Optimization'),
         actions: [
           // Toggle view button
           IconButton(
@@ -413,6 +647,14 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
             onPressed: _toggleViewMode,
             tooltip: _showMap ? 'Show List' : 'Show Map',
           ),
+          
+          // Show fitness evolution
+          if (_fitnessHistory.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.show_chart),
+              onPressed: _showFitnessEvolutionChart,
+              tooltip: 'Show Fitness Evolution',
+            ),
           
           // Refresh button
           IconButton(
@@ -472,45 +714,6 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
               icon: Icons.refresh,
               type: CustomButtonType.primary,
             ),
-            const SizedBox(height: 12),
-            CustomButton(
-              text: 'Check Connection',
-              onPressed: () async {
-                setState(() {
-                  _isLoading = true;
-                });
-                
-                try {
-                  final isConnected = await _testApiConnectivity();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(isConnected 
-                          ? 'Connection successful!' 
-                          : 'Cannot connect to server'),
-                        backgroundColor: isConnected ? Colors.green : Colors.red,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Connection test failed: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                } finally {
-                  if (mounted) {
-                    setState(() {
-                      _isLoading = false;
-                    });
-                  }
-                }
-              },
-              type: CustomButtonType.outline,
-            ),
           ],
         ),
       ),
@@ -522,7 +725,11 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       opacity: _fadeAnimation,
       child: Column(
         children: [
-          // Map takes most of the screen
+          // GA Results panel (if available)
+          if (_bestFitness != null || _completedGenerations != null)
+            _buildGAResultsPanel(),
+          
+          // Map takes the remaining space
           Expanded(
             child: RouteMapWidget(
               routeModel: _optimizedRoute,
@@ -538,11 +745,145 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
     );
   }
   
+  Widget _buildGAResultsPanel() {
+    return Card(
+      margin: const EdgeInsets.all(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.psychology, color: Colors.blue),
+                const SizedBox(width: 8),
+                const Text(
+                  'Genetic Algorithm Results',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                if (_fitnessHistory.isNotEmpty)
+                  TextButton.icon(
+                    icon: const Icon(Icons.show_chart, size: 16),
+                    label: const Text('Chart'),
+                    onPressed: _showFitnessEvolutionChart,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                // Best Fitness
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Best Fitness',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      Text(
+                        _bestFitness?.toStringAsFixed(4) ?? 'N/A',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Generations
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Generations',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      Text(
+                        '${_completedGenerations ?? 0}/$_generations',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Population
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Population',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      Text(
+                        _populationSize.toString(),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Distance
+                if (_optimizedRoute != null)
+                  Expanded(
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Distance',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        Text(
+                          '${_optimizedRoute!.totalDistance.toStringAsFixed(1)} km',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
   Widget _buildListView() {
     return FadeTransition(
       opacity: _fadeAnimation,
       child: Column(
         children: [
+          // GA Parameters panel
+          _buildGAParametersPanel(),
+          
           // Selection header
           Padding(
             padding: const EdgeInsets.all(16),
@@ -581,6 +922,365 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
                     },
                   ),
           ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildGAParametersPanel() {
+    return Card(
+      margin: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Header with toggle
+          InkWell(
+            onTap: () {
+              setState(() {
+                _showAdvancedSettings = !_showAdvancedSettings;
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(Icons.settings, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Genetic Algorithm Parameters',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _showAdvancedSettings 
+                        ? Icons.keyboard_arrow_up 
+                        : Icons.keyboard_arrow_down,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          // Expandable parameters section
+          if (_showAdvancedSettings) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  // Population Size
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Population Size',
+                              style: TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            Text(
+                              'Number of routes in each generation',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Slider(
+                              value: _populationSize.toDouble(),
+                              min: 20,
+                              max: 200,
+                              divisions: 18,
+                              label: _populationSize.toString(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _populationSize = value.round();
+                                  _resetGAResults();
+                                });
+                              },
+                            ),
+                            Text(
+                              _populationSize.toString(),
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Generations
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Generations',
+                              style: TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            Text(
+                              'Number of evolution cycles',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Slider(
+                              value: _generations.toDouble(),
+                              min: 50,
+                              max: 500,
+                              divisions: 18,
+                              label: _generations.toString(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _generations = value.round();
+                                  _resetGAResults();
+                                });
+                              },
+                            ),
+                            Text(
+                              _generations.toString(),
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Mutation Rate
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Mutation Rate',
+                              style: TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            Text(
+                              'Probability of random changes',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Slider(
+                              value: _mutationRate,
+                              min: 0.01,
+                              max: 0.5,
+                              divisions: 49,
+                              label: _mutationRate.toStringAsFixed(2),
+                              onChanged: (value) {
+                                setState(() {
+                                  _mutationRate = value;
+                                  _resetGAResults();
+                                });
+                              },
+                            ),
+                            Text(
+                              '${(_mutationRate * 100).toStringAsFixed(0)}%',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Crossover Rate
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Crossover Rate',
+                              style: TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            Text(
+                              'Probability of combining routes',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Slider(
+                              value: _crossoverRate,
+                              min: 0.1,
+                              max: 1.0,
+                              divisions: 18,
+                              label: _crossoverRate.toStringAsFixed(2),
+                              onChanged: (value) {
+                                setState(() {
+                                  _crossoverRate = value;
+                                  _resetGAResults();
+                                });
+                              },
+                            ),
+                            Text(
+                              '${(_crossoverRate * 100).toStringAsFixed(0)}%',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Max Points
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Max Points',
+                              style: TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                            Text(
+                              'Maximum water points in route',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Slider(
+                              value: _maxPoints.toDouble(),
+                              min: 3,
+                              max: 15,
+                              divisions: 12,
+                              label: _maxPoints.toString(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _maxPoints = value.round();
+                                  _resetGAResults();
+                                });
+                              },
+                            ),
+                            Text(
+                              _maxPoints.toString(),
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Quick presets
+                  const Text(
+                    'Quick Presets',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              _populationSize = 30;
+                              _generations = 50;
+                              _mutationRate = 0.2;
+                              _crossoverRate = 0.7;
+                              _maxPoints = 5;
+                              _resetGAResults();
+                            });
+                          },
+                          child: const Text('Fast'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              _populationSize = 50;
+                              _generations = 100;
+                              _mutationRate = 0.1;
+                              _crossoverRate = 0.8;
+                              _maxPoints = 8;
+                              _resetGAResults();
+                            });
+                          },
+                          child: const Text('Balanced'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              _populationSize = 100;
+                              _generations = 200;
+                              _mutationRate = 0.05;
+                              _crossoverRate = 0.9;
+                              _maxPoints = 12;
+                              _resetGAResults();
+                            });
+                          },
+                          child: const Text('Quality'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -743,15 +1443,36 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         ],
       ),
       child: _isOptimizing
-          ? const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 8),
-                  Text('Finding closest water supply points...'),
-                ],
-              ),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const LinearProgressIndicator(),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Running Genetic Algorithm...',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Pop: $_populationSize, Gen: $_generations, Mut: ${(_mutationRate * 100).round()}%',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             )
           : Column(
               mainAxisSize: MainAxisSize.min,
@@ -770,10 +1491,10 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            '${_selectedReports.length} location${_selectedReports.length == 1 ? '' : 's'} selected',
+                            '${_selectedReports.length} location${_selectedReports.length == 1 ? '' : 's'} selected • Pop: $_populationSize • Gen: $_generations',
                             style: TextStyle(
                               color: AppTheme.textSecondaryColor,
-                              fontSize: 14,
+                              fontSize: 12,
                             ),
                           ),
                         ),
@@ -784,12 +1505,32 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
                 // Main action button
                 CustomButton(
                   text: _optimizedRoute == null
-                      ? 'Find Closest Water Supply'
-                      : 'Recalculate Routes',
+                      ? 'Optimize with Genetic Algorithm'
+                      : 'Re-optimize Route',
                   onPressed: _selectedReports.isEmpty ? null : _optimizeRoute,
-                  icon: Icons.water_drop,
+                  icon: Icons.psychology,
                   isFullWidth: true,
                   type: CustomButtonType.primary,
+                ),
+                
+                // Quick settings toggle
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  icon: Icon(
+                    _showAdvancedSettings 
+                        ? Icons.keyboard_arrow_up 
+                        : Icons.settings,
+                    size: 16,
+                  ),
+                  label: Text(
+                    _showAdvancedSettings ? 'Hide Settings' : 'GA Settings',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _showAdvancedSettings = !_showAdvancedSettings;
+                    });
+                  },
                 ),
               ],
             ),
@@ -834,4 +1575,78 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
         return Colors.grey;
     }
   }
+}
+
+// Custom painter for fitness evolution chart
+class FitnessChartPainter extends CustomPainter {
+  final List<double> fitnessHistory;
+  
+  FitnessChartPainter(this.fitnessHistory);
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (fitnessHistory.isEmpty) return;
+    
+    final paint = Paint()
+      ..color = Colors.blue
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+    
+    final path = Path();
+    
+    // Calculate scaling factors
+    final maxFitness = fitnessHistory.reduce((a, b) => a > b ? a : b);
+    final minFitness = fitnessHistory.reduce((a, b) => a < b ? a : b);
+    final fitnessRange = maxFitness - minFitness;
+    
+    if (fitnessRange == 0) return;
+    
+    // Draw the fitness evolution line
+    for (int i = 0; i < fitnessHistory.length; i++) {
+      final x = (i / (fitnessHistory.length - 1)) * size.width;
+      final normalizedFitness = (fitnessHistory[i] - minFitness) / fitnessRange;
+      final y = size.height - (normalizedFitness * size.height);
+      
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    
+    canvas.drawPath(path, paint);
+    
+    // Draw grid lines
+    final gridPaint = Paint()
+      ..color = Colors.grey.withOpacity(0.3)
+      ..strokeWidth = 1.0;
+    
+    // Horizontal grid lines
+    for (int i = 0; i <= 4; i++) {
+      final y = (i / 4) * size.height;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+    
+    // Vertical grid lines
+    for (int i = 0; i <= 4; i++) {
+      final x = (i / 4) * size.width;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+    
+    // Draw data points
+    final pointPaint = Paint()
+      ..color = Colors.blue
+      ..style = PaintingStyle.fill;
+    
+    for (int i = 0; i < fitnessHistory.length; i += max(1, fitnessHistory.length ~/ 20)) {
+      final x = (i / (fitnessHistory.length - 1)) * size.width;
+      final normalizedFitness = (fitnessHistory[i] - minFitness) / fitnessRange;
+      final y = size.height - (normalizedFitness * size.height);
+      
+      canvas.drawCircle(Offset(x, y), 3, pointPaint);
+    }
+  }
+  
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

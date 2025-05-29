@@ -1,4 +1,4 @@
-// lib/services/api_service.dart - FIXED to work with your real backend
+// lib/services/api_service.dart - ENHANCED with GA Parameters Support
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as Math;
@@ -28,6 +28,113 @@ class WaterAnalysisResult {
     required this.originalClass,
     required this.confidence,
   });
+}
+
+class GAOptimizationRequest {
+  final String adminId;
+  final GeoPoint currentLocation;
+  final String destinationKeyword;
+  final int maxRoutes;
+  final int maxHops;
+  final String optimizationMethod;
+  final GAParameters gaConfig;
+  
+  GAOptimizationRequest({
+    required this.adminId,
+    required this.currentLocation,
+    required this.destinationKeyword,
+    this.maxRoutes = 10,
+    this.maxHops = 8,
+    this.optimizationMethod = 'genetic',
+    required this.gaConfig,
+  });
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'admin_id': adminId,
+      'current_location': {
+        'latitude': currentLocation.latitude,
+        'longitude': currentLocation.longitude,
+      },
+      'destination_keyword': destinationKeyword,
+      'max_routes': maxRoutes,
+      'max_hops': maxHops,
+      'optimization_method': optimizationMethod,
+      'ga_config': gaConfig.toJson(),
+    };
+  }
+}
+
+class GAParameters {
+  final int populationSize;
+  final int maxGenerations;
+  final int eliteSize;
+  final double mutationRate;
+  final double crossoverRate;
+  final int tournamentSize;
+  final int maxRouteLength;
+  final double timeLimit;
+  final int convergenceThreshold;
+  
+  GAParameters({
+    this.populationSize = 50,
+    this.maxGenerations = 100,
+    this.eliteSize = 5,
+    this.mutationRate = 0.1,
+    this.crossoverRate = 0.8,
+    this.tournamentSize = 3,
+    this.maxRouteLength = 8,
+    this.timeLimit = 30.0,
+    this.convergenceThreshold = 15,
+  });
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'population_size': populationSize,
+      'max_generations': maxGenerations,
+      'elite_size': eliteSize,
+      'mutation_rate': mutationRate,
+      'crossover_rate': crossoverRate,
+      'tournament_size': tournamentSize,
+      'max_route_length': maxRouteLength,
+      'time_limit': timeLimit,
+      'convergence_threshold': convergenceThreshold,
+    };
+  }
+}
+
+class GAOptimizationResult {
+  final bool success;
+  final String method;
+  final int totalRoutes;
+  final List<Map<String, dynamic>> routes;
+  final Map<String, dynamic> optimizationStats;
+  final double executionTimeSeconds;
+  final Map<String, dynamic>? algorithmDetails;
+  
+  GAOptimizationResult({
+    required this.success,
+    required this.method,
+    required this.totalRoutes,
+    required this.routes,
+    required this.optimizationStats,
+    required this.executionTimeSeconds,
+    this.algorithmDetails,
+  });
+  
+  factory GAOptimizationResult.fromJson(Map<String, dynamic> json) {
+    return GAOptimizationResult(
+      success: json['success'] ?? false,
+      method: json['method'] ?? 'Unknown',
+      totalRoutes: json['total_routes'] ?? 0,
+      routes: List<Map<String, dynamic>>.from(json['routes'] ?? []),
+      optimizationStats: Map<String, dynamic>.from(json['optimization_stats'] ?? {}),
+      executionTimeSeconds: (json['execution_time_seconds'] ?? 0.0).toDouble(),
+      algorithmDetails: json['algorithm_details'] != null 
+          ? Map<String, dynamic>.from(json['algorithm_details'])
+          : null,
+    );
+  }
 }
 
 class ApiService {
@@ -157,17 +264,24 @@ class ApiService {
     }
   }
   
-  // MAIN ROUTE OPTIMIZATION - Fixed to work with your backend
-  Future<Map<String, dynamic>> getOptimizedRoute(
+  // ENHANCED: Main route optimization with GA parameters support
+  Future<Map<String, dynamic>> getOptimizedRouteWithGA(
     List<ReportModel> reports,
     GeoPoint startLocation,
     String adminId,
+    GAParameters gaParams,
   ) async {
     try {
-      print('🚀 Starting route optimization with your backend...');
+      print('🚀 Starting GA route optimization with enhanced parameters...');
       print('📍 Start location: ${startLocation.latitude}, ${startLocation.longitude}');
       print('📊 Reports count: ${reports.length}');
       print('👤 Admin ID: $adminId');
+      print('🧬 GA Parameters:');
+      print('   Population: ${gaParams.populationSize}');
+      print('   Generations: ${gaParams.maxGenerations}');
+      print('   Mutation Rate: ${gaParams.mutationRate}');
+      print('   Crossover Rate: ${gaParams.crossoverRate}');
+      print('   Max Points: ${gaParams.maxRouteLength}');
       
       if (reports.isEmpty) {
         throw Exception('No reports provided for route optimization');
@@ -177,20 +291,31 @@ class ApiService {
         throw Exception('Admin ID is required for route optimization');
       }
       
-      // STEP 1: Try the new genetic algorithm endpoint (your main backend feature)
-      print('🧬 Attempting GA optimization...');
-      final gaResult = await _tryGeneticAlgorithmOptimization(reports, startLocation, adminId);
+      // Create GA optimization request
+      final gaRequest = GAOptimizationRequest(
+        adminId: adminId,
+        currentLocation: startLocation,
+        destinationKeyword: 'water',
+        maxRoutes: 1, // We want the best route
+        maxHops: gaParams.maxRouteLength,
+        optimizationMethod: 'genetic',
+        gaConfig: gaParams,
+      );
+      
+      // STEP 1: Try the enhanced genetic algorithm endpoint
+      print('🧬 Attempting enhanced GA optimization...');
+      final gaResult = await _tryEnhancedGeneticOptimization(gaRequest);
       if (gaResult != null) {
-        print('✅ GA optimization successful');
-        return gaResult;
+        print('✅ Enhanced GA optimization successful');
+        return _convertGAResultToRouteData(gaResult, gaRequest, reports);
       }
       
-      // STEP 2: Try the standard route optimization endpoint  
-      print('🔄 Trying standard route optimization...');
-      final standardResult = await _tryStandardOptimization(reports, startLocation, adminId);
-      if (standardResult != null) {
-        print('✅ Standard optimization successful');
-        return standardResult;
+      // STEP 2: Try the standard genetic algorithm endpoint  
+      print('🔄 Trying standard GA optimization...');
+      final standardGAResult = await _tryStandardGeneticOptimization(gaRequest);
+      if (standardGAResult != null) {
+        print('✅ Standard GA optimization successful');
+        return _convertGAResultToRouteData(standardGAResult, gaRequest, reports);
       }
       
       // STEP 3: Try finding nearest points directly
@@ -201,99 +326,93 @@ class ApiService {
         return nearestResult;
       }
       
-      // If all real attempts fail, this indicates a backend issue
-      throw Exception('Backend services are not responding properly. Please check if the Python server is running and has water supply data.');
+      // If all attempts fail, this indicates a backend issue
+      throw Exception('GA optimization services are not responding properly. Please check if the Python server is running with genetic algorithm support.');
       
     } catch (e) {
-      print('💥 Route optimization error: $e');
+      print('💥 GA Route optimization error: $e');
       
       if (e.toString().contains('TimeoutException') || e.toString().contains('timeout')) {
         throw Exception('Request timeout. Please check your internet connection and try again.');
       } else if (e.toString().contains('SocketException')) {
         throw Exception('Network error. Please check your internet connection.');
       } else {
-        throw Exception('Failed to find water supplies: $e');
+        throw Exception('Failed to optimize route with GA: $e');
       }
     }
   }
   
-  // Try Genetic Algorithm optimization (your main backend feature)
-  Future<Map<String, dynamic>?> _tryGeneticAlgorithmOptimization(
-    List<ReportModel> reports,
-    GeoPoint startLocation,
-    String adminId,
-  ) async {
+  // Try enhanced genetic algorithm optimization with full parameter support
+  Future<GAOptimizationResult?> _tryEnhancedGeneticOptimization(GAOptimizationRequest request) async {
     try {
-      final requestData = {
-        'admin_id': adminId,
-        'current_location': {
-          'latitude': startLocation.latitude,
-          'longitude': startLocation.longitude,
-        },
-        'destination_keyword': 'water',
-        'max_routes': 10,
-        'max_hops': 8,
-        'optimization_method': 'genetic',
-      };
+      print('🧬 Sending enhanced GA request...');
+      print('   URL: $baseUrl/optimize-route-genetic');
+      print('   Parameters: ${request.gaConfig.toJson()}');
       
       final response = await http.post(
         Uri.parse('$baseUrl/optimize-route-genetic'),
         headers: _headers,
-        body: json.encode(requestData),
-      ).timeout(const Duration(seconds: 30));
+        body: json.encode(request.toJson()),
+      ).timeout(Duration(seconds: (request.gaConfig.timeLimit + 10).round()));
       
-      print('🧬 GA Response status: ${response.statusCode}');
+      print('🧬 Enhanced GA Response status: ${response.statusCode}');
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as Map<String, dynamic>;
-        print('🧬 GA Response data: ${data.keys.toList()}');
+        print('🧬 Enhanced GA Response data keys: ${data.keys.toList()}');
         
-        if (data['success'] == true && data.containsKey('routes') && data['routes'] != null) {
-          final routes = data['routes'] as List;
-          if (routes.isNotEmpty) {
-            print('✅ GA found ${routes.length} routes');
-            return _convertGAResponseToRouteData(routes[0], requestData, reports);
+        if (data['success'] == true) {
+          final result = GAOptimizationResult.fromJson(data);
+          
+          if (result.routes.isNotEmpty) {
+            print('✅ Enhanced GA found ${result.routes.length} routes');
+            print('   Best fitness: ${result.optimizationStats['best_fitness']}');
+            print('   Generations completed: ${result.algorithmDetails?['generations_completed']}');
+            print('   Execution time: ${result.executionTimeSeconds}s');
+            return result;
           }
         }
         
         // Check if there's an error message that can help us debug
         if (data.containsKey('message')) {
-          print('🧬 GA message: ${data['message']}');
+          print('🧬 Enhanced GA message: ${data['message']}');
         }
+      } else {
+        print('❌ Enhanced GA failed with status: ${response.statusCode}');
+        print('   Response: ${response.body}');
       }
       
       return null;
     } catch (e) {
-      print('⚠️ GA optimization failed: $e');
+      print('⚠️ Enhanced GA optimization failed: $e');
       return null;
     }
   }
   
-  // Try standard route optimization 
-  Future<Map<String, dynamic>?> _tryStandardOptimization(
-    List<ReportModel> reports,
-    GeoPoint startLocation,
-    String adminId,
-  ) async {
+  // Try standard genetic algorithm optimization
+  Future<GAOptimizationResult?> _tryStandardGeneticOptimization(GAOptimizationRequest request) async {
     try {
-      final requestData = {
-        'admin_id': adminId,
+      // Create a simplified request for standard endpoint
+      final standardRequest = {
+        'admin_id': request.adminId,
         'current_location': {
-          'latitude': startLocation.latitude,
-          'longitude': startLocation.longitude,
+          'latitude': request.currentLocation.latitude,
+          'longitude': request.currentLocation.longitude,
         },
-        'destination_keyword': 'water',
-        'max_routes': 10,
-        'max_hops': 8,
+        'destination_keyword': request.destinationKeyword,
+        'max_routes': request.maxRoutes,
+        'max_hops': request.maxHops,
+        'optimization_method': 'genetic',
+        'ga_config': request.gaConfig.toJson(),
       };
       
       final response = await http.post(
         Uri.parse('$baseUrl/optimize-route-advanced'),
         headers: _headers,
-        body: json.encode(requestData),
-      ).timeout(const Duration(seconds: 30));
+        body: json.encode(standardRequest),
+      ).timeout(Duration(seconds: (request.gaConfig.timeLimit + 10).round()));
       
-      print('📥 Standard response status: ${response.statusCode}');
+      print('📥 Standard GA response status: ${response.statusCode}');
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as Map<String, dynamic>;
@@ -301,20 +420,135 @@ class ApiService {
         if (data['success'] == true && data.containsKey('routes') && data['routes'] != null) {
           final routes = data['routes'] as List;
           if (routes.isNotEmpty) {
-            print('✅ Standard optimization found ${routes.length} routes');
-            return _convertRouteResponseToRouteData(routes[0], requestData, reports);
+            print('✅ Standard GA found ${routes.length} routes');
+            
+            // Convert to GAOptimizationResult format
+            return GAOptimizationResult(
+              success: true,
+              method: data['method'] ?? 'Standard Genetic Algorithm',
+              totalRoutes: routes.length,
+              routes: routes.cast<Map<String, dynamic>>(),
+              optimizationStats: data['optimization_stats'] ?? {},
+              executionTimeSeconds: (data['execution_time_seconds'] ?? 0.0).toDouble(),
+              algorithmDetails: data['algorithm_details'],
+            );
           }
         }
       }
       
       return null;
     } catch (e) {
-      print('⚠️ Standard optimization failed: $e');
+      print('⚠️ Standard GA optimization failed: $e');
       return null;
     }
   }
   
-  // Try nearest points lookup
+  // Convert GA optimization result to route data format
+  Map<String, dynamic> _convertGAResultToRouteData(
+    GAOptimizationResult gaResult, 
+    GAOptimizationRequest request,
+    List<ReportModel> reports,
+  ) {
+    print('🔄 Converting GA result to route data');
+    
+    if (gaResult.routes.isEmpty) {
+      throw Exception('No routes returned from GA optimization');
+    }
+    
+    final bestRoute = gaResult.routes.first;
+    
+    // Extract route information from GA response
+    final List<Map<String, dynamic>> routePoints = [];
+    final List<Map<String, dynamic>> routeSegments = [];
+    
+    // Add start point
+    routePoints.add({
+      'nodeId': 'start',
+      'location': {
+        'latitude': request.currentLocation.latitude,
+        'longitude': request.currentLocation.longitude,
+      },
+      'address': 'Current Location',
+      'label': 'Start',
+    });
+    
+    // Process route waypoints if available
+    if (bestRoute.containsKey('waypoints') && bestRoute['waypoints'] is List) {
+      final waypoints = bestRoute['waypoints'] as List;
+      
+      for (int i = 0; i < waypoints.length; i++) {
+        final waypoint = waypoints[i];
+        if (waypoint is Map<String, dynamic> && waypoint.containsKey('latitude')) {
+          routePoints.add({
+            'nodeId': 'water-supply-$i',
+            'location': {
+              'latitude': waypoint['latitude'],
+              'longitude': waypoint['longitude'],
+            },
+            'address': waypoint['address'] ?? 'Water Supply Point ${i + 1}',
+            'label': waypoint['name'] ?? 'Water Supply',
+          });
+        }
+      }
+    }
+    
+    // Create route segments between consecutive points
+    for (int i = 0; i < routePoints.length - 1; i++) {
+      routeSegments.add({
+        'from': routePoints[i],
+        'to': routePoints[i + 1],
+        'distance': _calculateSegmentDistance(routePoints[i], routePoints[i + 1]),
+        'mode': 'transit',
+        'polyline': [
+          routePoints[i]['location'],
+          routePoints[i + 1]['location'],
+        ],
+      });
+    }
+    
+    // Calculate total distance
+    double totalDistance = 0.0;
+    if (bestRoute.containsKey('total_distance')) {
+      totalDistance = (bestRoute['total_distance'] as num).toDouble();
+    } else {
+      totalDistance = routeSegments.fold(0.0, (sum, segment) => sum + (segment['distance'] as double));
+    }
+    
+    return {
+      'id': 'ga-route-${DateTime.now().millisecondsSinceEpoch}',
+      'adminId': request.adminId,
+      'reportIds': reports.map((r) => r.id).toList(),
+      'points': routePoints,
+      'segments': routeSegments,
+      'totalDistance': totalDistance,
+      'walkingDistance': totalDistance * 0.1, // Estimate 10% walking
+      'transitDistance': totalDistance * 0.9,
+      'algorithm': gaResult.method,
+      'optimization_stats': gaResult.optimizationStats,
+      'algorithm_details': gaResult.algorithmDetails,
+      'execution_time_seconds': gaResult.executionTimeSeconds,
+      'fitness_score': gaResult.optimizationStats['best_fitness'],
+      'generations_completed': gaResult.algorithmDetails?['generations_completed'],
+      'convergence_status': gaResult.algorithmDetails?['convergence_status'],
+      'createdAt': DateTime.now().toIso8601String(),
+      'updatedAt': DateTime.now().toIso8601String(),
+    };
+  }
+  
+  // Calculate distance between two route points
+  double _calculateSegmentDistance(Map<String, dynamic> from, Map<String, dynamic> to) {
+    final fromLoc = from['location'] as Map<String, dynamic>;
+    final toLoc = to['location'] as Map<String, dynamic>;
+    
+    return _calculateDistance(
+      fromLoc['latitude'],
+      fromLoc['longitude'], 
+      toLoc['latitude'],
+      toLoc['longitude'],
+    );
+  }
+  
+  // Try nearest points lookup (fallback)
   Future<Map<String, dynamic>?> _tryNearestPointsLookup(
     GeoPoint startLocation,
     String adminId,
@@ -355,123 +589,6 @@ class ApiService {
       print('⚠️ Nearest points lookup failed: $e');
       return null;
     }
-  }
-  
-  // Convert GA response to route data
-  Map<String, dynamic> _convertGAResponseToRouteData(
-    Map<String, dynamic> gaRoute, 
-    Map<String, dynamic> requestData,
-    List<ReportModel> reports,
-  ) {
-    print('🔄 Converting GA response to route data');
-    
-    // Extract route information from GA response
-    final List<Map<String, dynamic>> routePoints = [];
-    final List<Map<String, dynamic>> routeSegments = [];
-    
-    // Add start point
-    routePoints.add({
-      'nodeId': 'start',
-      'location': requestData['current_location'],
-      'address': 'Current Location',
-      'label': 'Start',
-    });
-    
-    // Add destination point from GA route
-    if (gaRoute.containsKey('destination_point')) {
-      final destPoint = gaRoute['destination_point'];
-      routePoints.add({
-        'nodeId': 'ga-destination',
-        'location': {
-          'latitude': destPoint['latitude'],
-          'longitude': destPoint['longitude'],
-        },
-        'address': destPoint['address'] ?? 'Water Supply Point',
-        'label': 'Water Supply',
-      });
-      
-      // Create route segment
-      routeSegments.add({
-        'from': routePoints[0],
-        'to': routePoints[1],
-        'distance': gaRoute['total_distance'] ?? 0.0,
-        'mode': 'transit',
-        'polyline': [
-          requestData['current_location'],
-          {
-            'latitude': destPoint['latitude'],
-            'longitude': destPoint['longitude'],
-          },
-        ],
-      });
-    }
-    
-    return {
-      'id': 'ga-route-${DateTime.now().millisecondsSinceEpoch}',
-      'adminId': requestData['admin_id'],
-      'reportIds': reports.map((r) => r.id).toList(),
-      'points': routePoints,
-      'segments': routeSegments,
-      'totalDistance': gaRoute['total_distance']?.toDouble() ?? 0.0,
-      'walkingDistance': gaRoute['walking_distance']?.toDouble() ?? 0.0,
-      'transitDistance': gaRoute['route_distance']?.toDouble() ?? 0.0,
-      'algorithm': 'Genetic Algorithm',
-      'fitnessScore': gaRoute['fitness_score'],
-      'createdAt': DateTime.now().toIso8601String(),
-      'updatedAt': DateTime.now().toIso8601String(),
-    };
-  }
-  
-  // Convert standard route response to route data
-  Map<String, dynamic> _convertRouteResponseToRouteData(
-    Map<String, dynamic> route, 
-    Map<String, dynamic> requestData,
-    List<ReportModel> reports,
-  ) {
-    print('🔄 Converting standard route response to route data');
-    
-    final List<Map<String, dynamic>> segments = [];
-    final dynamic routeSegments = route['segments'];
-    
-    if (routeSegments != null && routeSegments is List) {
-      for (final segment in routeSegments) {
-        if (segment is Map<String, dynamic>) {
-          List<Map<String, dynamic>> polyline = [];
-          if (segment['polyline'] != null && segment['polyline'] is List) {
-            for (final point in segment['polyline']) {
-              if (point is Map<String, dynamic>) {
-                polyline.add({
-                  'latitude': point['latitude'] ?? 0.0,
-                  'longitude': point['longitude'] ?? 0.0,
-                });
-              }
-            }
-          }
-          
-          segments.add({
-            'from': segment['from'] ?? {},
-            'to': segment['to'] ?? {},
-            'distance': segment['distance'] ?? 0.0,
-            'mode': segment['mode'] ?? 'transit',
-            'polyline': polyline,
-          });
-        }
-      }
-    }
-    
-    return {
-      'id': 'route-${DateTime.now().millisecondsSinceEpoch}',
-      'adminId': requestData['admin_id'],
-      'reportIds': reports.map((r) => r.id).toList(),
-      'points': route['points'] ?? [],
-      'segments': segments,
-      'totalDistance': route['total_distance']?.toDouble() ?? 0.0,
-      'walkingDistance': route['walking_distance']?.toDouble() ?? 0.0,
-      'transitDistance': route['route_distance']?.toDouble() ?? 0.0,
-      'algorithm': 'Standard Route Optimization',
-      'createdAt': DateTime.now().toIso8601String(),
-      'updatedAt': DateTime.now().toIso8601String(),
-    };
   }
   
   // Create route from nearest points
@@ -542,10 +659,25 @@ class ApiService {
       'totalDistance': totalDistance,
       'walkingDistance': Math.min(0.5, totalDistance * 0.2),
       'transitDistance': totalDistance,
-      'algorithm': 'Nearest Points',
+      'algorithm': 'Nearest Points Fallback',
+      'optimization_stats': {
+        'method': 'nearest_points',
+        'points_found': nearestPoints.length,
+      },
       'createdAt': DateTime.now().toIso8601String(),
       'updatedAt': DateTime.now().toIso8601String(),
     };
+  }
+  
+  // Legacy method - now calls the enhanced GA version
+  Future<Map<String, dynamic>> getOptimizedRoute(
+    List<ReportModel> reports,
+    GeoPoint startLocation,
+    String adminId,
+  ) async {
+    // Use default GA parameters for legacy calls
+    final defaultGAParams = GAParameters();
+    return await getOptimizedRouteWithGA(reports, startLocation, adminId, defaultGAParams);
   }
   
   // Helper: Calculate distance between two points
@@ -586,65 +718,7 @@ class ApiService {
   }
 
   Future<WaterQualityState> analyzeWaterQuality(File imageFile) async {
-    try {
-      print('Sending image for water quality analysis to $baseUrl/analyze');
-      
-      final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/analyze'));
-      
-      final fileStream = http.ByteStream(imageFile.openRead());
-      final fileLength = await imageFile.length();
-      
-      final multipartFile = http.MultipartFile(
-        'image',
-        fileStream,
-        fileLength,
-        filename: 'water_image.jpg',
-      );
-      
-      request.files.add(multipartFile);
-      
-      print('Sending request to analyze water quality...');
-      final response = await request.send();
-      final responseBody = await response.stream.bytesToString();
-      print('Received response: $responseBody');
-      
-      if (response.statusCode == 200) {
-        final data = json.decode(responseBody);
-        print('Response data: $data');
-        
-        if (data['success'] == true) {
-          if (data.containsKey('water_quality_class') && data['water_quality_class'] != null) {
-            final String waterQualityClass = data['water_quality_class'].toString();
-            print('Water quality class from backend: $waterQualityClass');
-            
-            final WaterQualityState mappedState = mapWaterQualityClass(waterQualityClass);
-            print('Mapped to enum value: $mappedState');
-            return mappedState;
-          } 
-          else if (data.containsKey('water_quality_index')) {
-            final qualityIndex = data['water_quality_index'] as int;
-            
-            if (qualityIndex >= 0 && qualityIndex < WaterQualityState.values.length) {
-              return WaterQualityState.values[qualityIndex];
-            } else {
-              print('Warning: Invalid water_quality_index $qualityIndex');
-              return WaterQualityState.unknown;
-            }
-          } else {
-            print('Warning: No quality information in response');
-            return WaterQualityState.unknown;
-          }
-        } else {
-          print('Error analyzing image: ${data['message']}');
-          return WaterQualityState.unknown;
-        }
-      } else {
-        print('Failed to analyze image: ${responseBody}');
-        throw Exception('Failed to analyze image: ${responseBody}');
-      }
-    } catch (e) {
-      print('Error analyzing water quality: $e');
-      return WaterQualityState.unknown;
-    }
+    final result = await analyzeWaterQualityWithConfidence(imageFile);
+    return result.waterQuality;
   }
 }
