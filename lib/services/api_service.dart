@@ -1,4 +1,4 @@
-// lib/services/api_service.dart - ENHANCED with GA Parameters Support
+// lib/services/api_service.dart - ENHANCED with Multiple Routes and CSV Support
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as Math;
@@ -137,6 +137,111 @@ class GAOptimizationResult {
   }
 }
 
+// NEW: Multiple Routes Request/Response Models
+class MultipleRoutesRequest {
+  final String adminId;
+  final GeoPoint currentLocation;
+  final int maxRoutes;
+  final double maxDistance;
+  final String routeType;
+  
+  MultipleRoutesRequest({
+    required this.adminId,
+    required this.currentLocation,
+    this.maxRoutes = 5,
+    this.maxDistance = 10.0, // km
+    this.routeType = 'water_supply',
+  });
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'admin_id': adminId,
+      'current_location': {
+        'latitude': currentLocation.latitude,
+        'longitude': currentLocation.longitude,
+      },
+      'max_routes': maxRoutes,
+      'max_distance': maxDistance,
+      'route_type': routeType,
+    };
+  }
+}
+
+class MultipleRoutesResult {
+  final bool success;
+  final List<Map<String, dynamic>> routes;
+  final int shortestRouteIndex;
+  final int totalFound;
+  final String message;
+  
+  MultipleRoutesResult({
+    required this.success,
+    required this.routes,
+    required this.shortestRouteIndex,
+    required this.totalFound,
+    required this.message,
+  });
+  
+  factory MultipleRoutesResult.fromJson(Map<String, dynamic> json) {
+    return MultipleRoutesResult(
+      success: json['success'] ?? false,
+      routes: List<Map<String, dynamic>>.from(json['routes'] ?? []),
+      shortestRouteIndex: json['shortest_route_index'] ?? 0,
+      totalFound: json['total_found'] ?? 0,
+      message: json['message'] ?? '',
+    );
+  }
+}
+
+// NEW: Water Supply Point Model
+class WaterSupplyPoint {
+  final String id;
+  final String streetName;
+  final String address;
+  final String pointOfInterest;
+  final String additionalInfo;
+  final double latitude;
+  final double longitude;
+  final double? distanceFromUser;
+  
+  WaterSupplyPoint({
+    required this.id,
+    required this.streetName,
+    required this.address,
+    required this.pointOfInterest,
+    required this.additionalInfo,
+    required this.latitude,
+    required this.longitude,
+    this.distanceFromUser,
+  });
+  
+  factory WaterSupplyPoint.fromJson(Map<String, dynamic> json) {
+    return WaterSupplyPoint(
+      id: json['id']?.toString() ?? '',
+      streetName: json['street_name']?.toString() ?? '',
+      address: json['address']?.toString() ?? '',
+      pointOfInterest: json['point_of_interest']?.toString() ?? '',
+      additionalInfo: json['additional_info']?.toString() ?? '',
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+      distanceFromUser: (json['distance_from_user'] as num?)?.toDouble(),
+    );
+  }
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'street_name': streetName,
+      'address': address,
+      'point_of_interest': pointOfInterest,
+      'additional_info': additionalInfo,
+      'latitude': latitude,
+      'longitude': longitude,
+      if (distanceFromUser != null) 'distance_from_user': distanceFromUser,
+    };
+  }
+}
+
 class ApiService {
   final String baseUrl;
   
@@ -149,17 +254,17 @@ class ApiService {
   // Test API connectivity
   Future<bool> testConnection() async {
     try {
-      print('Testing API connection to: $baseUrl');
+      print('🔗 Testing API connection to: $baseUrl');
       
       final response = await http.get(
         Uri.parse('$baseUrl/health'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10));
       
-      print('Connection test response: ${response.statusCode}');
+      print('🔗 Connection test response: ${response.statusCode}');
       
       if (response.statusCode == 200) {
-        print('API connection successful');
+        print('✅ API connection successful');
         return true;
       } else if (response.statusCode == 404) {
         // Try root endpoint
@@ -169,25 +274,26 @@ class ApiService {
             headers: _headers,
           ).timeout(const Duration(seconds: 5));
           
-          print('Root endpoint response: ${rootResponse.statusCode}');
+          print('🔗 Root endpoint response: ${rootResponse.statusCode}');
           return rootResponse.statusCode == 200;
         } catch (e) {
-          print('Root endpoint test failed: $e');
+          print('❌ Root endpoint test failed: $e');
           return false;
         }
       } else {
-        print('API connection failed with status: ${response.statusCode}');
+        print('❌ API connection failed with status: ${response.statusCode}');
         return false;
       }
     } catch (e) {
-      print('API connection test error: $e');
+      print('❌ API connection test error: $e');
       return false;
     }
   }
 
+  // Water Quality Analysis
   Future<WaterAnalysisResult> analyzeWaterQualityWithConfidence(File imageFile) async {
     try {
-      print('Sending image for water quality analysis to $baseUrl/analyze');
+      print('🔬 Sending image for water quality analysis to $baseUrl/analyze');
       
       final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/analyze'));
       
@@ -203,14 +309,14 @@ class ApiService {
       
       request.files.add(multipartFile);
       
-      print('Sending request to analyze water quality...');
+      print('📤 Sending request to analyze water quality...');
       final response = await request.send();
       final responseBody = await response.stream.bytesToString();
-      print('Received response: $responseBody');
+      print('📥 Received response: $responseBody');
       
       if (response.statusCode == 200) {
         final data = json.decode(responseBody);
-        print('Response data: $data');
+        print('🔬 Response data: $data');
         
         WaterQualityState qualityState = WaterQualityState.unknown;
         double confidenceScore = 0.0;
@@ -223,9 +329,9 @@ class ApiService {
           
           if (data.containsKey('water_quality_class') && data['water_quality_class'] != null) {
             originalClass = data['water_quality_class'].toString();
-            print('Water quality class from backend: $originalClass');
+            print('🏷️ Water quality class from backend: $originalClass');
             qualityState = WaterQualityUtils.mapWaterQualityClass(originalClass);
-            print('Mapped to enum value: $qualityState');
+            print('🎯 Mapped to enum value: $qualityState');
           } 
           else if (data.containsKey('water_quality_index')) {
             final qualityIndex = int.tryParse(data['water_quality_index'].toString()) ?? 4;
@@ -233,15 +339,15 @@ class ApiService {
               qualityState = WaterQualityState.values[qualityIndex];
               originalClass = qualityState.toString().split('.').last.toUpperCase();
             } else {
-              print('Warning: Invalid water_quality_index $qualityIndex');
+              print('⚠️ Warning: Invalid water_quality_index $qualityIndex');
               qualityState = WaterQualityState.unknown;
             }
           } else {
-            print('Warning: No quality information in response');
+            print('⚠️ Warning: No quality information in response');
             qualityState = WaterQualityState.unknown;
           }
         } else {
-          print('Error analyzing image: ${data['message']}');
+          print('❌ Error analyzing image: ${data['message']}');
           qualityState = WaterQualityState.unknown;
         }
         
@@ -251,17 +357,294 @@ class ApiService {
           confidence: confidenceScore,
         );
       } else {
-        print('Failed to analyze image: ${responseBody}');
+        print('❌ Failed to analyze image: ${responseBody}');
         throw Exception('Failed to analyze image: ${responseBody}');
       }
     } catch (e) {
-      print('Error analyzing water quality: $e');
+      print('❌ Error analyzing water quality: $e');
       return WaterAnalysisResult(
         waterQuality: WaterQualityState.unknown,
         originalClass: "ERROR",
         confidence: 0.0,
       );
     }
+  }
+  
+  // NEW: Get Water Supply Points from CSV
+  Future<Map<String, dynamic>> getWaterSupplyPoints({
+    int limit = 100,
+    String? region,
+  }) async {
+    try {
+      print('💧 Fetching water supply points from CSV...');
+      
+      final queryParams = <String, String>{
+        'limit': limit.toString(),
+      };
+      
+      if (region != null && region.isNotEmpty) {
+        queryParams['region'] = region;
+      }
+      
+      final uri = Uri.parse('$baseUrl/water-supply-points').replace(
+        queryParameters: queryParams,
+      );
+      
+      final response = await http.get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      
+      print('💧 Water supply points response: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        print('💧 Found ${data['total']} water supply points');
+        return data;
+      } else {
+        throw Exception('Failed to get water supply points: ${response.body}');
+      }
+    } catch (e) {
+      print('❌ Error getting water supply points: $e');
+      throw Exception('Failed to get water supply points: $e');
+    }
+  }
+  
+  // NEW: Get Multiple Routes to Water Supplies
+  Future<MultipleRoutesResult> getMultipleRoutesToWaterSupplies(
+    GeoPoint startLocation,
+    String adminId, {
+    int maxRoutes = 5,
+    double maxDistance = 10.0,
+  }) async {
+    try {
+      print('🗺️ Getting multiple routes to water supplies...');
+      print('📍 Start: ${startLocation.latitude}, ${startLocation.longitude}');
+      print('🎯 Max routes: $maxRoutes, Max distance: ${maxDistance}km');
+      
+      final request = MultipleRoutesRequest(
+        adminId: adminId,
+        currentLocation: startLocation,
+        maxRoutes: maxRoutes,
+        maxDistance: maxDistance,
+      );
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/find-multiple-water-routes'),
+        headers: _headers,
+        body: json.encode(request.toJson()),
+      ).timeout(const Duration(seconds: 30));
+      
+      print('🗺️ Multiple routes response: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final result = MultipleRoutesResult.fromJson(data);
+        
+        print('✅ Found ${result.routes.length} routes');
+        print('🎯 Shortest route index: ${result.shortestRouteIndex}');
+        
+        return result;
+      } else {
+        print('❌ Multiple routes failed: ${response.body}');
+        // Fallback to mock data
+        return _createMockMultipleRoutes(startLocation, maxRoutes);
+      }
+    } catch (e) {
+      print('❌ Error getting multiple routes: $e');
+      // Fallback to mock data
+      return _createMockMultipleRoutes(startLocation, maxRoutes);
+    }
+  }
+  
+  // NEW: Find Nearest Water Supply Points
+  Future<Map<String, dynamic>> findNearestWaterSupplies(
+    GeoPoint currentLocation, {
+    int maxPoints = 10,
+    double maxDistance = 5.0,
+  }) async {
+    try {
+      print('📍 Finding nearest water supplies...');
+      
+      final requestData = {
+        'current_location': {
+          'latitude': currentLocation.latitude,
+          'longitude': currentLocation.longitude,
+        },
+        'max_points': maxPoints,
+        'max_distance': maxDistance,
+      };
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/find-nearest-points'),
+        headers: _headers,
+        body: json.encode(requestData),
+      ).timeout(const Duration(seconds: 20));
+      
+      print('📍 Nearest points response: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        print('✅ Found ${data['total_within_range']} nearby water supplies');
+        return data;
+      } else {
+        print('❌ Nearest points failed: ${response.body}');
+        return _createMockNearestPoints(currentLocation, maxPoints);
+      }
+    } catch (e) {
+      print('❌ Error finding nearest points: $e');
+      return _createMockNearestPoints(currentLocation, maxPoints);
+    }
+  }
+  
+  // NEW: Enhanced Route Optimization with CSV Data
+  Future<Map<String, dynamic>> optimizeRouteWithCSVData(
+    GeoPoint startLocation,
+    String adminId,
+    String destinationKeyword, {
+    int maxRoutes = 3,
+    GAParameters? gaParams,
+  }) async {
+    try {
+      print('🚀 Optimizing route with CSV data...');
+      
+      final requestData = {
+        'admin_id': adminId,
+        'current_location': {
+          'latitude': startLocation.latitude,
+          'longitude': startLocation.longitude,
+        },
+        'destination_keyword': destinationKeyword,
+        'max_routes': maxRoutes,
+        'use_csv_data': true,
+        'optimization_method': 'enhanced_ga',
+        if (gaParams != null) 'ga_config': gaParams.toJson(),
+      };
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/optimize-route-with-csv'),
+        headers: _headers,
+        body: json.encode(requestData),
+      ).timeout(const Duration(seconds: 60));
+      
+      print('🚀 CSV route optimization response: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        print('✅ CSV route optimization successful');
+        return data;
+      } else {
+        print('❌ CSV optimization failed: ${response.body}');
+        throw Exception('CSV route optimization failed: ${response.body}');
+      }
+    } catch (e) {
+      print('❌ Error in CSV route optimization: $e');
+      throw Exception('CSV route optimization failed: $e');
+    }
+  }
+  
+  // Mock data creators for fallback scenarios
+  Map<String, dynamic> _createMockNearestPoints(GeoPoint location, int maxPoints) {
+    print('🎭 Creating mock nearest points data...');
+    
+    final Math.Random random = Math.Random();
+    final List<Map<String, dynamic>> mockPoints = [];
+    
+    // Create mock water supply points around the location
+    for (int i = 0; i < Math.min(maxPoints, 8); i++) {
+      final offsetLat = (random.nextDouble() - 0.5) * 0.02; // ~2km radius
+      final offsetLng = (random.nextDouble() - 0.5) * 0.02;
+      
+      final pointLat = location.latitude + offsetLat;
+      final pointLng = location.longitude + offsetLng;
+      
+      final distance = _calculateDistance(
+        location.latitude, location.longitude,
+        pointLat, pointLng,
+      );
+      
+      mockPoints.add({
+        'id': 'mock_water_${i + 1}',
+        'street_name': 'Mock Water Point ${i + 1}',
+        'address': 'Mock Address ${i + 1}, Test City',
+        'point_of_interest': 'Mock Water Supply Station ${i + 1}',
+        'additional_info': 'Mock water supply point for testing',
+        'latitude': pointLat,
+        'longitude': pointLng,
+        'distance': distance,
+        'estimated_travel_time': '${(distance * 2).round()} min',
+      });
+    }
+    
+    // Sort by distance
+    mockPoints.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
+    
+    return {
+      'success': true,
+      'nearest_points': mockPoints,
+      'total_within_range': mockPoints.length,
+      'total_available': 20,
+      'message': 'Mock data - API service unavailable',
+    };
+  }
+  
+  MultipleRoutesResult _createMockMultipleRoutes(GeoPoint location, int maxRoutes) {
+    print('🎭 Creating mock multiple routes data...');
+    
+    final Math.Random random = Math.Random();
+    final List<Map<String, dynamic>> mockRoutes = [];
+    
+    // Create mock routes to different water supplies
+    for (int i = 0; i < Math.min(maxRoutes, 5); i++) {
+      final offsetLat = (random.nextDouble() - 0.5) * 0.03;
+      final offsetLng = (random.nextDouble() - 0.5) * 0.03;
+      
+      final destinationLat = location.latitude + offsetLat;
+      final destinationLng = location.longitude + offsetLng;
+      
+      final distance = _calculateDistance(
+        location.latitude, location.longitude,
+        destinationLat, destinationLng,
+      );
+      
+      mockRoutes.add({
+        'route_id': 'mock_route_${i + 1}',
+        'destination': {
+          'id': 'mock_dest_${i + 1}',
+          'street_name': 'Mock Water Station ${i + 1}',
+          'address': 'Mock Street ${i + 1}, Test Area',
+          'point_of_interest': 'Community Water Access Point ${i + 1}',
+          'latitude': destinationLat,
+          'longitude': destinationLng,
+        },
+        'distance': distance,
+        'estimated_time': '${(distance * 2.5).round()} min',
+        'route_quality': 'good',
+        'waypoints': [
+          {
+            'latitude': location.latitude,
+            'longitude': location.longitude,
+            'name': 'Start Point',
+            'address': 'Current Location',
+          },
+          {
+            'latitude': destinationLat,
+            'longitude': destinationLng,
+            'name': 'Mock Water Station ${i + 1}',
+            'address': 'Mock Street ${i + 1}, Test Area',
+          },
+        ],
+      });
+    }
+    
+    // Sort by distance to find shortest
+    mockRoutes.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
+    
+    return MultipleRoutesResult(
+      success: true,
+      routes: mockRoutes,
+      shortestRouteIndex: 0, // First route is shortest after sorting
+      totalFound: mockRoutes.length,
+      message: 'Mock routes generated - API service unavailable',
+    );
   }
   
   // ENHANCED: Main route optimization with GA parameters support

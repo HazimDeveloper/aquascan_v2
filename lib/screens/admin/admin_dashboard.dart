@@ -1,4 +1,4 @@
-// lib/screens/admin/admin_dashboard.dart
+// lib/screens/admin/admin_dashboard.dart - UPDATED with Admin Report
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +11,7 @@ import '../../services/database_service.dart';
 import '../../widgets/common/custom_loader.dart';
 import 'report_list_screen.dart';
 import 'route_optimization_screen.dart';
+import 'admin_report_screen.dart'; // NEW IMPORT
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -26,6 +27,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   UserModel? _adminUser;
   int _pendingReportsCount = 0;
   int _resolvedReportsCount = 0;
+  int _adminCreatedReportsCount = 0; // NEW: Track admin-created reports
   List<ReportModel> _recentReports = [];
   String _errorMessage = '';
   
@@ -75,6 +77,12 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
       final pendingReports = await databaseService.getUnresolvedReportsList();
       final resolvedReports = await databaseService.getResolvedReportsList();
       
+      // NEW: Count admin-created reports
+      final adminCreatedReports = pendingReports.where((report) => 
+        report.userName.toLowerCase().contains('admin')).length +
+        resolvedReports.where((report) => 
+        report.userName.toLowerCase().contains('admin')).length;
+      
       // Load recent reports (limited to 5)
       final recentReports = pendingReports.take(5).toList();
       
@@ -82,6 +90,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
         _adminUser = adminUser;
         _pendingReportsCount = pendingReports.length;
         _resolvedReportsCount = resolvedReports.length;
+        _adminCreatedReportsCount = adminCreatedReports; // NEW
         _recentReports = recentReports;
         _isLoading = false;
       });
@@ -186,8 +195,8 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             
             const SizedBox(height: 24),
             
-            // Stats cards
-            _buildStatsCards(),
+            // Enhanced stats cards with admin reports
+            _buildEnhancedStatsCards(),
             
             const SizedBox(height: 24),
             
@@ -201,7 +210,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             ),
             const SizedBox(height: 16),
             
-            _buildQuickActions(),
+            _buildEnhancedQuickActions(),
             
             const SizedBox(height: 24),
             
@@ -299,6 +308,31 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                           color: AppTheme.textSecondaryColor,
                         ),
                       ),
+                      // NEW: Admin badge
+                      Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.admin_panel_settings, size: 16, color: Colors.orange),
+                            SizedBox(width: 4),
+                            Text(
+                              'Administrator',
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -320,45 +354,93 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     );
   }
   
-  Widget _buildStatsCards() {
-    return Row(
+  // ENHANCED: Stats cards with admin reports count
+  Widget _buildEnhancedStatsCards() {
+    return Column(
       children: [
-        Expanded(
-          child: _buildStatCard(
-            title: 'Pending',
-            value: _pendingReportsCount.toString(),
-            icon: Icons.pending_actions,
-            color: AppTheme.warningColor,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ReportListScreen(
-                    showResolved: false,
-                  ),
-                ),
-              );
-            },
-          ),
+        // First row: Pending and Resolved
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                title: 'Pending',
+                value: _pendingReportsCount.toString(),
+                icon: Icons.pending_actions,
+                color: AppTheme.warningColor,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ReportListScreen(
+                        showResolved: false,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _buildStatCard(
+                title: 'Resolved',
+                value: _resolvedReportsCount.toString(),
+                icon: Icons.check_circle,
+                color: AppTheme.successColor,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ReportListScreen(
+                        showResolved: true,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildStatCard(
-            title: 'Resolved',
-            value: _resolvedReportsCount.toString(),
-            icon: Icons.check_circle,
-            color: AppTheme.successColor,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ReportListScreen(
-                    showResolved: true,
-                  ),
-                ),
-              );
-            },
-          ),
+        
+        const SizedBox(height: 16),
+        
+        // Second row: Admin reports and total
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                title: 'Admin Reports',
+                value: _adminCreatedReportsCount.toString(),
+                icon: Icons.admin_panel_settings,
+                color: Colors.orange,
+                onTap: () {
+                  // Navigate to admin reports filter
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ReportListScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _buildStatCard(
+                title: 'Total Reports',
+                value: (_pendingReportsCount + _resolvedReportsCount).toString(),
+                icon: Icons.assessment,
+                color: AppTheme.infoColor,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ReportListScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -415,9 +497,104 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     );
   }
   
-  Widget _buildQuickActions() {
+  // ENHANCED: Quick actions with admin report creation
+  Widget _buildEnhancedQuickActions() {
     return Column(
       children: [
+        // NEW: Admin report creation card (Featured)
+        Card(
+          elevation: 3,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          color: Colors.orange.shade50,
+          child: InkWell(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AdminReportScreen(),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.orange.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.admin_panel_settings,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Create Admin Report',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Create detailed reports with admin privileges and enhanced metadata',
+                          style: TextStyle(
+                            color: AppTheme.textSecondaryColor,
+                            fontSize: 14,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'ADMIN FEATURE',
+                            style: TextStyle(
+                              color: Colors.orange.shade800,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
         // Route optimization card
         Card(
           elevation: 2,
@@ -464,7 +641,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Calculate the most efficient route to visit all pending reports',
+                          'Calculate efficient routes to water supplies using AI',
                           style: TextStyle(
                             color: AppTheme.textSecondaryColor,
                             fontSize: 13,
@@ -524,7 +701,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'View All Reports',
+                          'Manage All Reports',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -532,7 +709,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Browse and manage all water quality reports',
+                          'Browse, filter, and manage all water quality reports',
                           style: TextStyle(
                             color: AppTheme.textSecondaryColor,
                             fontSize: 13,
@@ -554,7 +731,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
         
         const SizedBox(height: 12),
         
-        // Analytics card (could be implemented in future)
+        // Analytics card (future feature)
         Card(
           elevation: 2,
           shape: RoundedRectangleBorder(
@@ -562,10 +739,16 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
           ),
           child: InkWell(
             onTap: () {
-              // Navigate to analytics screen (to be implemented)
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Analytics feature coming soon!'),
+                SnackBar(
+                  content: Row(
+                    children: [
+                      Icon(Icons.info, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('Advanced analytics feature coming soon!'),
+                    ],
+                  ),
+                  backgroundColor: Colors.blue,
                 ),
               );
             },
@@ -600,7 +783,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'View trends and statistics about water quality reports',
+                          'View trends, statistics and AI insights about water quality',
                           style: TextStyle(
                             color: AppTheme.textSecondaryColor,
                             fontSize: 13,
@@ -669,6 +852,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   
   Widget _buildReportItem(ReportModel report) {
     String timeAgo = _getTimeAgo(report.createdAt);
+    bool isAdminReport = report.userName.toLowerCase().contains('admin');
     
     return Card(
       elevation: 2,
@@ -685,41 +869,58 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              // Report image thumbnail
-              if (report.imageUrls.isNotEmpty)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: 60,
-                    height: 60,
-                    child: Image.network(
-                      report.imageUrls.first,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          color: Colors.grey[200],
-                          child: const Icon(
-                            Icons.image_not_supported,
-                            color: Colors.grey,
-                          ),
-                        );
-                      },
+              // Report image thumbnail or placeholder
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      width: 60,
+                      height: 60,
+                      child: report.imageUrls.isNotEmpty
+                          ? Image.network(
+                              report.imageUrls.first,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  color: Colors.grey[200],
+                                  child: const Icon(
+                                    Icons.image_not_supported,
+                                    color: Colors.grey,
+                                  ),
+                                );
+                              },
+                            )
+                          : Container(
+                              color: Colors.grey[200],
+                              child: const Icon(
+                                Icons.water_drop,
+                                color: Colors.grey,
+                              ),
+                            ),
                     ),
                   ),
-                )
-              else
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.image_not_supported,
-                    color: Colors.grey,
-                  ),
-                ),
+                  
+                  // NEW: Admin badge overlay
+                  if (isAdminReport)
+                    Positioned(
+                      top: 2,
+                      right: 2,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.orange,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Icon(
+                          Icons.admin_panel_settings,
+                          color: Colors.white,
+                          size: 10,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               
               const SizedBox(width: 16),
               
@@ -771,6 +972,27 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                             ),
                           ),
                         ),
+                        
+                        // NEW: Admin indicator
+                        if (isAdminReport) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'ADMIN',
+                              style: TextStyle(
+                                color: Colors.orange.shade800,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                        
                         const SizedBox(width: 8),
                         Text(
                           timeAgo,
@@ -937,7 +1159,29 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                 ),
               ),
               const SizedBox(height: 4),
-              Text(report.userName),
+              Row(
+                children: [
+                  Text(report.userName),
+                  if (report.userName.toLowerCase().contains('admin')) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'ADMIN',
+                        style: TextStyle(
+                          color: Colors.orange.shade800,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
               
               const SizedBox(height: 16),
               
@@ -1012,244 +1256,43 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   }
   
   String _getWaterQualityText(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return 'Optimum';
-    case WaterQualityState.highPh:
-      return 'High pH';
-    case WaterQualityState.highPhTemp:
-      return 'High pH & Temp';
-    case WaterQualityState.lowPh:
-      return 'Low pH';
-    case WaterQualityState.lowTemp:
-      return 'Low Temperature';
-    case WaterQualityState.lowTempHighPh:
-      return 'Low Temp & High pH';
-    case WaterQualityState.unknown:
-    default:
-      return 'Unknown';
+    switch (quality) {
+      case WaterQualityState.optimum:
+        return 'Optimum';
+      case WaterQualityState.highPh:
+        return 'High pH';
+      case WaterQualityState.highPhTemp:
+        return 'High pH & Temp';
+      case WaterQualityState.lowPh:
+        return 'Low pH';
+      case WaterQualityState.lowTemp:
+        return 'Low Temperature';
+      case WaterQualityState.lowTempHighPh:
+        return 'Low Temp & High pH';
+      case WaterQualityState.unknown:
+      default:
+        return 'Unknown';
+    }
   }
-}
   
- Color _getWaterQualityColor(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return Colors.blue;
-    case WaterQualityState.lowTemp:
-      return Colors.green;
-    case WaterQualityState.highPh:
-    case WaterQualityState.lowPh:
-      return Colors.orange;
-    case WaterQualityState.highPhTemp:
-      return Colors.red;
-    case WaterQualityState.lowTempHighPh:
-      return Colors.purple;
-    case WaterQualityState.unknown:
-    default:
-      return Colors.grey;
+  Color _getWaterQualityColor(WaterQualityState quality) {
+    switch (quality) {
+      case WaterQualityState.optimum:
+        return Colors.blue;
+      case WaterQualityState.lowTemp:
+        return Colors.green;
+      case WaterQualityState.highPh:
+      case WaterQualityState.lowPh:
+        return Colors.orange;
+      case WaterQualityState.highPhTemp:
+        return Colors.red;
+      case WaterQualityState.lowTempHighPh:
+        return Colors.purple;
+      case WaterQualityState.unknown:
+      default:
+        return Colors.grey;
+    }
   }
-}
-
-void _showWaterQualityDetailsDialog(ReportModel report, double? confidence) {
-  showDialog(
-    context: context,
-    builder: (BuildContext context) {
-      return AlertDialog(
-        title: Text('Water Quality Details'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Water quality indicator
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _getWaterQualityColor(report.waterQuality).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _getWaterQualityColor(report.waterQuality),
-                    width: 1,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _getWaterQualityIcon(report.waterQuality),
-                          color: _getWaterQualityColor(report.waterQuality),
-                          size: 24,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _getWaterQualityText(report.waterQuality),
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: _getWaterQualityColor(report.waterQuality),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (confidence != null) ...[
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(
-                        value: confidence / 100,
-                        backgroundColor: Colors.grey.shade200,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          _getWaterQualityColor(report.waterQuality),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          'Confidence: ${confidence.toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Text(
-                      _getWaterQualityDescription(report.waterQuality),
-                      style: TextStyle(
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 20),
-              
-              // Report details heading
-              const Text(
-                'Report Details',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-              const SizedBox(height: 12),
-              
-              // Report date
-              _buildDetailRow(
-                icon: Icons.calendar_today,
-                title: 'Reported on',
-                value: DateFormat('MMM d, yyyy, h:mm a').format(report.createdAt),
-              ),
-              
-              const SizedBox(height: 8),
-              
-              // Reported by
-              _buildDetailRow(
-                icon: Icons.person,
-                title: 'Reported by',
-                value: report.userName,
-              ),
-              
-              const SizedBox(height: 8),
-              
-              // Location
-              _buildDetailRow(
-                icon: Icons.location_on,
-                title: 'Location',
-                value: report.address,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: Text('Close'),
-          ),
-        ],
-      );
-    },
-  );
-}
-
-IconData _getWaterQualityIcon(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return Icons.check_circle;
-    case WaterQualityState.lowTemp:
-      return Icons.ac_unit;
-    case WaterQualityState.highPh:
-    case WaterQualityState.lowPh:
-      return Icons.science;
-    case WaterQualityState.highPhTemp:
-      return Icons.whatshot;
-    case WaterQualityState.lowTempHighPh:
-      return Icons.warning;
-    case WaterQualityState.unknown:
-    default:
-      return Icons.help_outline;
-  }
-}
-
-Widget _buildDetailRow({
-  required IconData icon,
-  required String title,
-  required String value,
-}) {
-  return Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Icon(icon, size: 16, color: Colors.grey.shade600),
-      const SizedBox(width: 8),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 12,
-              ),
-            ),
-            Text(
-              value,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ],
-  );
-}
-
-String _getWaterQualityDescription(WaterQualityState quality) {
-  switch (quality) {
-    case WaterQualityState.optimum:
-      return 'The water has optimal pH and temperature levels for general use.';
-    case WaterQualityState.highPh:
-      return 'The water has high pH levels and may be alkaline. May cause skin irritation or affect taste.';
-    case WaterQualityState.highPhTemp:
-      return 'The water has both high pH and temperature. Not recommended for direct use.';
-    case WaterQualityState.lowPh:
-      return 'The water has low pH levels and may be acidic. May cause corrosion or affect taste.';
-    case WaterQualityState.lowTemp:
-      return 'The water has lower than optimal temperature but otherwise may be suitable for use.';
-    case WaterQualityState.lowTempHighPh:
-      return 'The water has low temperature and high pH levels. Use with caution.';
-    case WaterQualityState.unknown:
-    default:
-      return 'The water quality could not be determined from the provided image.';
-  }
-}
-
   
   String _getTimeAgo(DateTime dateTime) {
     final now = DateTime.now();
