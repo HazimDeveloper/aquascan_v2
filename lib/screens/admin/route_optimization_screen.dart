@@ -51,7 +51,9 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   late DatabaseService _databaseService;
   late LocationService _locationService;
   late ApiService _apiService;
-  
+  List<Map<String, dynamic>> _multipleRoutes = [];
+int? _shortestRouteIndex;
+bool _showMultipleRoutesMode = false;
   // Debug logging
   final bool _debugMode = true;
   
@@ -60,6 +62,7 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
       print('📱 RouteOptimization: $message');
     }
   }
+
   
   @override
   void initState() {
@@ -877,26 +880,32 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
   }
   
   Widget _buildListView() {
-    return FadeTransition(
-      opacity: _fadeAnimation,
-      child: Column(
-        children: [
-          // GA Parameters panel
-          _buildGAParametersPanel(),
-          
-          // Selection header
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Select Water Points (${_selectedReports.length}/${_allReports.length})',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+  return FadeTransition(
+    opacity: _fadeAnimation,
+    child: Column(
+      children: [
+        // GA Parameters panel
+        _buildGAParametersPanel(),
+        
+        // NEW: Multiple Routes Control Panel
+        _buildMultipleRoutesControlPanel(),
+        
+        // Selection header
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _showMultipleRoutesMode 
+                    ? 'Multiple Water Supply Routes (${_multipleRoutes.length})'
+                    : 'Select Water Points (${_selectedReports.length}/${_allReports.length})',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
                 ),
+              ),
+              if (!_showMultipleRoutesMode)
                 TextButton(
                   onPressed: _selectAllReports,
                   child: Text(
@@ -905,27 +914,524 @@ class _RouteOptimizationScreenState extends State<RouteOptimizationScreen> with 
                         : 'Select All',
                   ),
                 ),
-              ],
+            ],
+          ),
+        ),
+        
+        // Content based on mode
+        Expanded(
+          child: _showMultipleRoutesMode 
+              ? _buildMultipleRoutesListView()
+              : _buildReportsSelectionView(),
+        ),
+      ],
+    ),
+  );
+}
+
+// NEW: Multiple Routes Control Panel
+Widget _buildMultipleRoutesControlPanel() {
+  return Card(
+    margin: const EdgeInsets.all(16),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.route, color: Colors.orange),
+              const SizedBox(width: 8),
+              const Text(
+                'Route Discovery Mode',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Switch(
+                value: _showMultipleRoutesMode,
+                onChanged: (value) {
+                  setState(() {
+                    _showMultipleRoutesMode = value;
+                    if (!value) {
+                      _multipleRoutes.clear();
+                      _shortestRouteIndex = null;
+                    }
+                  });
+                },
+                activeColor: Colors.orange,
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 12),
+          
+          Text(
+            _showMultipleRoutesMode 
+                ? 'Discover multiple routes to water supply points and identify the shortest path.'
+                : 'Select individual water points for genetic algorithm optimization.',
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
             ),
           ),
           
-          // Reports list
-          Expanded(
-            child: _allReports.isEmpty
-                ? _buildEmptyReportsList()
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _allReports.length,
-                    itemBuilder: (context, index) {
-                      final report = _allReports[index];
-                      return _buildReportItem(report);
-                    },
+          const SizedBox(height: 16),
+          
+          // Action buttons
+          Row(
+            children: [
+              if (_showMultipleRoutesMode) ...[
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _isLoading ? null : _loadMultipleRoutes,
+                    icon: _isLoading 
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(Icons.search),
+                    label: Text(_isLoading ? 'Searching...' : 'Find Water Supply Routes'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                    ),
                   ),
+                ),
+                
+                if (_multipleRoutes.isNotEmpty) ...[
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _multipleRoutes.clear();
+                        _shortestRouteIndex = null;
+                      });
+                    },
+                    icon: Icon(Icons.clear),
+                    label: Text('Clear'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      side: BorderSide(color: Colors.orange),
+                    ),
+                  ),
+                ],
+              ] else ...[
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _selectedReports.isEmpty ? null : _optimizeRoute,
+                    icon: Icon(Icons.psychology),
+                    label: Text('Optimize with GA'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
-    );
+    ),
+  );
+}
+
+// NEW: Multiple Routes List View
+Widget _buildMultipleRoutesListView() {
+  if (_multipleRoutes.isEmpty) {
+    return _buildEmptyMultipleRoutesView();
   }
+  
+  return ListView.builder(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    itemCount: _multipleRoutes.length,
+    itemBuilder: (context, index) {
+      final route = _multipleRoutes[index];
+      final isShortestRoute = index == _shortestRouteIndex;
+      
+      return _buildMultipleRouteItem(route, index, isShortestRoute);
+    },
+  );
+}
+
+Widget _buildEmptyMultipleRoutesView() {
+  return Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.route,
+          size: 80,
+          color: Colors.orange.withOpacity(0.7),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'No Routes Found',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Tap "Find Water Supply Routes" to discover multiple paths to water supply points',
+          style: TextStyle(
+            color: AppTheme.textSecondaryColor,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _loadMultipleRoutes,
+          icon: Icon(Icons.search),
+          label: Text('Find Routes'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.orange,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildMultipleRouteItem(Map<String, dynamic> route, int index, bool isShortestRoute) {
+  final destination = route['destination_details'] as Map<String, dynamic>? ?? {};
+  
+  return Card(
+    elevation: isShortestRoute ? 4 : 2,
+    margin: const EdgeInsets.only(bottom: 12),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: isShortestRoute 
+          ? BorderSide(color: Colors.red, width: 2)
+          : BorderSide.none,
+    ),
+    child: InkWell(
+      onTap: () {
+        // Optionally, implement route focusing logic here if needed
+        // For now, do nothing or add your own logic
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with route indicator
+            Row(
+              children: [
+                // Route rank indicator
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isShortestRoute ? Colors.red : _getRouteColorFromHex(route['color'] ?? '#0066CC'),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: Center(
+                    child: isShortestRoute 
+                        ? Icon(Icons.star, color: Colors.white, size: 20)
+                        : Text(
+                            '${index + 1}',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                  ),
+                ),
+                
+                const SizedBox(width: 16),
+                
+                // Route info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            isShortestRoute ? 'SHORTEST ROUTE' : 'Route ${index + 1}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: isShortestRoute ? Colors.red : Colors.black87,
+                            ),
+                          ),
+                          if (isShortestRoute) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'RECOMMENDED',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        destination['street_name'] ?? route['destination_name'] ?? 'Water Supply Point',
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 14,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Quick stats
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${route['distance']?.toStringAsFixed(1) ?? '?'} km',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: isShortestRoute ? Colors.red : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      route['travel_time'] ?? '? min',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Detailed information
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                children: [
+                  // Distance and time row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildRouteStatItem(
+                          Icons.straighten,
+                          'Distance',
+                          '${route['distance']?.toStringAsFixed(1) ?? '?'} km',
+                          isShortestRoute ? Colors.red : Colors.blue,
+                        ),
+                      ),
+                      Container(height: 40, width: 1, color: Colors.grey.shade300),
+                      Expanded(
+                        child: _buildRouteStatItem(
+                          Icons.access_time,
+                          'Travel Time',
+                          route['travel_time'] ?? '? min',
+                          isShortestRoute ? Colors.red : Colors.blue,
+                        ),
+                      ),
+                      Container(height: 40, width: 1, color: Colors.grey.shade300),
+                      Expanded(
+                        child: _buildRouteStatItem(
+                          Icons.trending_up,
+                          'Priority',
+                          '#${route['priority_rank'] ?? index + 1}',
+                          isShortestRoute ? Colors.red : Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  if (destination['address'] != null) ...[
+                    const SizedBox(height: 12),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.location_on, size: 16, color: Colors.grey.shade600),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            destination['address'] ?? '',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 13,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildRouteStatItem(IconData icon, String label, String value, Color color) {
+  return Column(
+    children: [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          color: Colors.grey.shade600,
+        ),
+      ),
+    ],
+  );
+}
+
+// Existing reports selection view
+Widget _buildReportsSelectionView() {
+  if (_allReports.isEmpty) {
+    return _buildEmptyReportsList();
+  }
+  
+  return ListView.builder(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    itemCount: _allReports.length,
+    itemBuilder: (context, index) {
+      final report = _allReports[index];
+      return _buildReportItem(report);
+    },
+  );
+}
+
+// NEW: Load multiple routes method
+Future<void> _loadMultipleRoutes() async {
+  if (_currentLocation == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Current location is required'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+  
+  setState(() {
+    _isLoading = true;
+    _errorMessage = '';
+  });
+  
+  try {
+    _logDebug('Loading multiple polyline routes...');
+    
+    final result = await _apiService.getPolylineRoutesToWaterSupplies(
+      _currentLocation!,
+      _authService.currentUser!.uid,
+      maxRoutes: 10,
+      maxDistance: 20.0,
+    );
+    
+    if (result['success'] == true) {
+      final routes = result['polyline_routes'] as List<dynamic>;
+      
+      setState(() {
+        _multipleRoutes = routes.cast<Map<String, dynamic>>();
+        _shortestRouteIndex = 0; // First route is shortest
+        _isLoading = false;
+      });
+      
+      _logDebug('✅ Loaded ${routes.length} polyline routes');
+      
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text('Found ${routes.length} routes to water supplies'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } else {
+      throw Exception(result['message'] ?? 'Failed to load routes');
+    }
+  } catch (e) {
+    _logDebug('❌ Error loading multiple routes: $e');
+    setState(() {
+      _errorMessage = e.toString();
+      _isLoading = false;
+    });
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading routes: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// Helper method to get route color from hex
+Color _getRouteColorFromHex(String hexColor) {
+  try {
+    final hex = hexColor.replaceAll('#', '');
+    return Color(int.parse('FF$hex', radix: 16));
+  } catch (e) {
+    return Colors.blue; // Fallback color
+  }
+}
   
   Widget _buildGAParametersPanel() {
     return Card(

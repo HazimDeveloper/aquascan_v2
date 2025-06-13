@@ -1,4 +1,6 @@
 // lib/widgets/admin/map_widget.dart - ENHANCED with Multiple Routes
+import 'dart:math' as Math show cos, sin, atan2, asin;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -256,97 +258,250 @@ class _RouteMapWidgetState extends State<RouteMapWidget> with TickerProviderStat
     );
   }
   
-  // ENHANCED: Build multiple route polylines with different colors and animations
-  List<Polyline> _buildEnhancedRoutePolylines() {
-    final polylines = <Polyline>[];
+ List<Polyline> _buildEnhancedRoutePolylines() {
+  final polylines = <Polyline>[];
+  
+  if (widget.showMultipleRoutes && widget.multipleRoutes?.isNotEmpty == true) {
+    _logDebug('Building ${widget.multipleRoutes!.length} multiple routes polylines');
     
-    if (widget.showMultipleRoutes && widget.multipleRoutes?.isNotEmpty == true) {
-      _logDebug('Building ${widget.multipleRoutes!.length} multiple routes polylines');
+    // Build polylines for each route using the polyline_points data
+    for (int i = 0; i < widget.multipleRoutes!.length; i++) {
+      final route = widget.multipleRoutes![i];
+      final isShortestRoute = i == widget.shortestRouteIndex;
+      final isSelectedRoute = i == _selectedRouteIndex;
       
-      // Build polylines for each route from current location to water supply
-      for (int i = 0; i < widget.multipleRoutes!.length; i++) {
-        final route = widget.multipleRoutes![i];
-        final isShortestRoute = i == widget.shortestRouteIndex;
-        final isSelectedRoute = i == _selectedRouteIndex;
+      // Extract polyline points from route data
+      if (route.containsKey('polyline_points') && route['polyline_points'] is List) {
+        final polylineData = route['polyline_points'] as List<dynamic>;
         
-        if (widget.currentLocation != null && route.containsKey('destination')) {
-          final destination = route['destination'] as Map<String, dynamic>;
-          
-          // Create route points from current location to destination
-          final points = [
-            LatLng(widget.currentLocation!.latitude, widget.currentLocation!.longitude),
-            LatLng(
-              destination['latitude']?.toDouble() ?? 0.0,
-              destination['longitude']?.toDouble() ?? 0.0,
-            ),
-          ];
-          
-          // Determine route color and style
+        final points = polylineData.map((point) {
+          if (point is Map<String, dynamic>) {
+            final lat = (point['latitude'] as num?)?.toDouble() ?? 0.0;
+            final lng = (point['longitude'] as num?)?.toDouble() ?? 0.0;
+            return LatLng(lat, lng);
+          }
+          return null;
+        }).where((point) => point != null && point.latitude != 0.0 && point.longitude != 0.0)
+         .cast<LatLng>()
+         .toList();
+        
+        if (points.length >= 2) {
+          // Determine route styling based on priority
           Color routeColor;
           double strokeWidth;
-          List<double> pattern = [];
+          List<Color> gradientColors = [];
           
           if (isShortestRoute) {
-            routeColor = Colors.green;
+            routeColor = Colors.red;
             strokeWidth = 8.0;
+            gradientColors = [Colors.red.shade600, Colors.red.shade400];
           } else if (isSelectedRoute) {
             routeColor = Colors.blue;
             strokeWidth = 6.0;
+            gradientColors = [Colors.blue.shade600, Colors.blue.shade400];
           } else {
-            routeColor = _getRouteColor(i);
+            routeColor = _getRouteColorFromHex(route['color'] ?? '#0066CC');
             strokeWidth = 4.0;
-            pattern = [10, 5]; // Dashed for non-primary routes
           }
           
           // Apply animation opacity
           final animatedOpacity = _routeAnimation.value;
+          final opacity = isShortestRoute ? 0.9 : isSelectedRoute ? 0.8 : 0.6;
           
+          // Main route polyline
           polylines.add(
             Polyline(
-  points: points,
-  color: routeColor.withOpacity(animatedOpacity),
-  strokeWidth: strokeWidth,
-  // If your Polyline API supports dashArray, use it like below:
-  // dashArray: pattern,
-),
+              points: points,
+              color: routeColor.withOpacity(animatedOpacity * opacity),
+              strokeWidth: strokeWidth,
+            ),
           );
           
-          _logDebug('Added route $i: ${isShortestRoute ? "SHORTEST" : isSelectedRoute ? "SELECTED" : "regular"} - ${route['distance']}km');
-        }
-      }
-    } 
-    // Single route mode (existing logic)
-    else if (widget.routeModel != null && widget.routeModel!.segments.isNotEmpty) {
-      _logDebug('Building single route polylines');
-      
-      for (int i = 0; i < widget.routeModel!.segments.length; i++) {
-        final segment = widget.routeModel!.segments[i];
-        
-        if (segment.polyline.isNotEmpty) {
-          try {
-            final points = segment.polyline
-                .map((point) => LatLng(point.latitude, point.longitude))
-                .toList();
-            
-            if (points.length >= 2) {
-              polylines.add(
-                Polyline(
-                  points: points,
-                  color: Colors.blue,
-                  strokeWidth: 5.0,
-                ),
-              );
-            }
-          } catch (e) {
-            _logDebug('Error creating polyline for segment $i: $e');
+          // Add shadow/glow effect for shortest route
+          if (isShortestRoute) {
+            polylines.add(
+              Polyline(
+                points: points,
+                color: Colors.red.withOpacity(animatedOpacity * 0.3),
+                strokeWidth: strokeWidth + 4,
+              ),
+            );
           }
+          
+          // Add direction indicators (arrows) for longer routes
+          if (points.length > 10 && (isShortestRoute || isSelectedRoute)) {
+            _addDirectionArrows(polylines, points, routeColor, animatedOpacity);
+          }
+          
+          _logDebug('Added polyline route $i: ${points.length} points, ${isShortestRoute ? "SHORTEST" : isSelectedRoute ? "SELECTED" : "regular"} - ${route['distance']}km');
+        } else {
+          _logDebug('Skipped route $i: insufficient points (${points.length})');
+        }
+      } else {
+        _logDebug('Skipped route $i: no polyline_points data');
+      }
+    }
+  } 
+  // Single route mode (existing GA optimization result)
+  else if (widget.routeModel != null && widget.routeModel!.segments.isNotEmpty) {
+    _logDebug('Building single route polylines from RouteModel');
+    
+    for (int i = 0; i < widget.routeModel!.segments.length; i++) {
+      final segment = widget.routeModel!.segments[i];
+      
+      if (segment.polyline.isNotEmpty) {
+        try {
+          final points = segment.polyline
+              .map((point) => LatLng(point.latitude, point.longitude))
+              .toList();
+          
+          if (points.length >= 2) {
+            // Main route line
+            polylines.add(
+              Polyline(
+                points: points,
+                color: AppTheme.primaryColor.withOpacity(0.8),
+                strokeWidth: 6.0,
+              ),
+            );
+            
+            // Shadow effect
+            polylines.add(
+              Polyline(
+                points: points,
+                color: AppTheme.primaryColor.withOpacity(0.3),
+                strokeWidth: 10.0,
+              ),
+            );
+            
+            _logDebug('Added GA route segment $i: ${points.length} points');
+          }
+        } catch (e) {
+          _logDebug('Error creating polyline for segment $i: $e');
         }
       }
     }
-    
-    _logDebug('Created ${polylines.length} polylines total');
-    return polylines;
   }
+  // Fallback: Simple lines from current location to selected reports
+  else if (widget.currentLocation != null && widget.selectedReports.isNotEmpty) {
+    _logDebug('Building simple polylines from current location to selected reports');
+    
+    for (int i = 0; i < widget.selectedReports.length; i++) {
+      final report = widget.selectedReports[i];
+      
+      final points = [
+        LatLng(widget.currentLocation!.latitude, widget.currentLocation!.longitude),
+        LatLng(report.location.latitude, report.location.longitude),
+      ];
+      
+      polylines.add(
+        Polyline(
+          points: points,
+          color: AppTheme.primaryColor.withOpacity(0.7),
+          strokeWidth: 4.0,
+        ),
+      );
+    }
+  }
+  
+  _logDebug('Created ${polylines.length} polylines total');
+  return polylines;
+}
+
+// Helper method to add direction arrows along the route
+void _addDirectionArrows(List<Polyline> polylines, List<LatLng> points, Color color, double opacity) {
+  // Add arrow indicators at 25%, 50%, and 75% of the route
+  final arrowPositions = [0.25, 0.5, 0.75];
+  
+  for (final position in arrowPositions) {
+    final index = (points.length * position).round().clamp(1, points.length - 1);
+    final currentPoint = points[index];
+    final previousPoint = points[index - 1];
+    
+    // Calculate arrow direction
+    final bearing = _calculateBearing(previousPoint, currentPoint);
+    
+    // Create small arrow polyline
+    final arrowLength = 0.001; // Very small arrow
+    final arrowAngle = 30 * (3.14159 / 180); // 30 degrees in radians
+    
+    final arrowPoint1 = _getPointAtBearingAndDistance(
+      currentPoint, 
+      bearing + 180 - arrowAngle, 
+      arrowLength
+    );
+    final arrowPoint2 = _getPointAtBearingAndDistance(
+      currentPoint, 
+      bearing + 180 + arrowAngle, 
+      arrowLength
+    );
+    
+    // Add arrow lines
+    polylines.add(
+      Polyline(
+        points: [currentPoint, arrowPoint1],
+        color: color.withOpacity(opacity * 0.8),
+        strokeWidth: 3.0,
+      ),
+    );
+    polylines.add(
+      Polyline(
+        points: [currentPoint, arrowPoint2],
+        color: color.withOpacity(opacity * 0.8),
+        strokeWidth: 3.0,
+      ),
+    );
+  }
+}
+
+// Helper method to calculate bearing between two points
+double _calculateBearing(LatLng start, LatLng end) {
+  final startLat = start.latitude * (3.14159 / 180);
+  final startLng = start.longitude * (3.14159 / 180);
+  final endLat = end.latitude * (3.14159 / 180);
+  final endLng = end.longitude * (3.14159 / 180);
+  
+  final dLng = endLng - startLng;
+  
+  final y = Math.sin(dLng) * Math.cos(endLat);
+  final x = Math.cos(startLat) * Math.sin(endLat) - 
+            Math.sin(startLat) * Math.cos(endLat) * Math.cos(dLng);
+  
+  final bearing = Math.atan2(y, x);
+  return (bearing * (180 / 3.14159) + 360) % 360;
+}
+
+// Helper method to get point at bearing and distance
+LatLng _getPointAtBearingAndDistance(LatLng start, double bearing, double distance) {
+  final bearingRad = bearing * (3.14159 / 180);
+  final startLatRad = start.latitude * (3.14159 / 180);
+  final startLngRad = start.longitude * (3.14159 / 180);
+  
+  final newLatRad = Math.asin(
+    Math.sin(startLatRad) * Math.cos(distance) +
+    Math.cos(startLatRad) * Math.sin(distance) * Math.cos(bearingRad)
+  );
+  
+  final newLngRad = startLngRad + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(distance) * Math.cos(startLatRad),
+    Math.cos(distance) - Math.sin(startLatRad) * Math.sin(newLatRad)
+  );
+  
+  return LatLng(
+    newLatRad * (180 / 3.14159),
+    newLngRad * (180 / 3.14159),
+  );
+}
+
+// Helper method to get route color from hex string
+Color _getRouteColorFromHex(String hexColor) {
+  try {
+    final hex = hexColor.replaceAll('#', '');
+    return Color(int.parse('FF$hex', radix: 16));
+  } catch (e) {
+    return Colors.blue; // Fallback color
+  }
+}
   
   // Get distinct colors for different routes
   Color _getRouteColor(int index) {
@@ -363,56 +518,533 @@ class _RouteMapWidgetState extends State<RouteMapWidget> with TickerProviderStat
     return colors[index % colors.length];
   }
   
-  // ENHANCED: Build markers with water supply points and route indicators
   List<Marker> _buildEnhancedMarkers() {
-    final markers = <Marker>[];
+  final markers = <Marker>[];
+  
+  _logDebug('Building enhanced markers...');
+  
+  // PRIORITY 1: Current location marker (always visible and on top)
+  if (widget.currentLocation != null) {
+    markers.add(_buildCurrentLocationMarker());
+    _logDebug('Added current location marker');
+  }
+  
+  // PRIORITY 2: Multiple routes mode - Add water supply destination markers
+  if (widget.showMultipleRoutes && widget.multipleRoutes?.isNotEmpty == true) {
+    _logDebug('Adding ${widget.multipleRoutes!.length} water supply destination markers');
     
-    _logDebug('Building enhanced markers...');
-    
-    // Add current location marker (always on top)
-    if (widget.currentLocation != null) {
-      markers.add(_buildCurrentLocationMarker());
-    }
-    
-    // Multiple routes mode: Add water supply markers
-    if (widget.showMultipleRoutes && widget.waterSupplyPoints?.isNotEmpty == true) {
-      _logDebug('Adding ${widget.waterSupplyPoints!.length} water supply markers');
+    for (int i = 0; i < widget.multipleRoutes!.length; i++) {
+      final route = widget.multipleRoutes![i];
+      final isShortestRoute = i == widget.shortestRouteIndex;
+      final isSelectedRoute = i == _selectedRouteIndex;
       
-      for (int i = 0; i < widget.waterSupplyPoints!.length; i++) {
-        final waterSupply = widget.waterSupplyPoints![i];
-        final isShortestRoute = i == widget.shortestRouteIndex;
-        final isSelectedRoute = i == _selectedRouteIndex;
-        
-        markers.add(_buildWaterSupplyMarker(waterSupply, i, isShortestRoute, isSelectedRoute));
+      if (route.containsKey('destination_details')) {
+        final destination = route['destination_details'] as Map<String, dynamic>;
+        markers.add(_buildWaterSupplyDestinationMarker(
+          route, 
+          destination, 
+          i, 
+          isShortestRoute, 
+          isSelectedRoute
+        ));
       }
     }
-    // Single route mode: Add route point markers
-    else if (widget.routeModel != null && widget.routeModel!.points.isNotEmpty) {
-      _logDebug('Adding ${widget.routeModel!.points.length} route point markers');
+    _logDebug('Added ${widget.multipleRoutes!.length} destination markers');
+  }
+  // PRIORITY 3: Single route mode - Add route point markers
+  else if (widget.routeModel != null && widget.routeModel!.points.isNotEmpty) {
+    _logDebug('Adding ${widget.routeModel!.points.length} route point markers');
+    
+    for (int i = 0; i < widget.routeModel!.points.length; i++) {
+      final point = widget.routeModel!.points[i];
       
-      for (int i = 0; i < widget.routeModel!.points.length; i++) {
-        final point = widget.routeModel!.points[i];
+      // Skip the start point (current location) to avoid duplication
+      if (point.nodeId == "start" || 
+          point.nodeId.contains("current") ||
+          point.label?.toLowerCase().contains("start") == true) {
+        continue;
+      }
+      
+      markers.add(_buildRoutePointMarker(point));
+    }
+    _logDebug('Added route point markers (excluding start point)');
+  }
+  // PRIORITY 4: Default mode - Add report markers
+  else if (widget.reports.isNotEmpty) {
+    _logDebug('Adding ${widget.reports.length} report markers');
+    
+    for (int i = 0; i < widget.reports.length; i++) {
+      final report = widget.reports[i];
+      markers.add(_buildReportMarker(report));
+    }
+    _logDebug('Added report markers');
+  }
+  
+  // PRIORITY 5: Add selected reports markers (if in selection mode)
+  if (widget.selectedReports.isNotEmpty && !widget.showMultipleRoutes) {
+    _logDebug('Adding ${widget.selectedReports.length} selected report markers');
+    
+    for (int i = 0; i < widget.selectedReports.length; i++) {
+      final report = widget.selectedReports[i];
+      markers.add(_buildSelectedReportMarker(report, i));
+    }
+  }
+  
+  _logDebug('Total markers created: ${markers.length}');
+  return markers;
+}
+
+// Enhanced water supply destination marker with detailed info
+Marker _buildWaterSupplyDestinationMarker(
+  Map<String, dynamic> route,
+  Map<String, dynamic> destination,
+  int index,
+  bool isShortestRoute,
+  bool isSelectedRoute,
+) {
+  return Marker(
+    point: LatLng(
+      (destination['latitude'] as num?)?.toDouble() ?? 0.0,
+      (destination['longitude'] as num?)?.toDouble() ?? 0.0,
+    ),
+    width: 200,
+    height: 140,
+    child: GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedRouteIndex = _selectedRouteIndex == index ? null : index;
+        });
         
-        // Skip the start point (current location)
-        if (point.nodeId == "start" || point.nodeId.contains("current")) {
-          continue;
+        if (widget.onRouteSelected != null) {
+          widget.onRouteSelected!(index);
         }
         
-        markers.add(_buildRoutePointMarker(point));
-      }
-    }
-    // Default mode: Add report markers
-    else {
-      _logDebug('Adding ${widget.reports.length} report markers');
-      
-      for (final report in widget.reports) {
-        markers.add(_buildReportMarker(report));
-      }
-    }
-    
-    _logDebug('Total markers created: ${markers.length}');
-    return markers;
-  }
+        // Show route details
+        _showRouteDetailsSnackBar(route, index, isShortestRoute);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.elasticOut,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Marker container with enhanced styling
+            Stack(
+              children: [
+                // Glow effect for shortest route
+                if (isShortestRoute)
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.3),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                
+                // Main marker
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: isShortestRoute ? 70 : isSelectedRoute ? 65 : 60,
+                  height: isShortestRoute ? 70 : isSelectedRoute ? 65 : 60,
+                  decoration: BoxDecoration(
+                    color: isShortestRoute 
+                        ? Colors.red 
+                        : isSelectedRoute 
+                            ? Colors.blue 
+                            : _getRouteColorFromHex(route['color'] ?? '#0066CC'),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: isShortestRoute ? 15 : 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Icon(
+                      isShortestRoute ? Icons.star : Icons.water_drop,
+                      color: Colors.white,
+                      size: isShortestRoute ? 40 : isSelectedRoute ? 35 : 30,
+                      key: ValueKey(isShortestRoute ? 'star' : 'water'),
+                    ),
+                  ),
+                ),
+                
+                // Route rank badge
+                Positioned(
+                  top: -5,
+                  right: -5,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: isShortestRoute ? 30 : 25,
+                    height: isShortestRoute ? 30 : 25,
+                    decoration: BoxDecoration(
+                      color: isShortestRoute ? Colors.red : Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isShortestRoute ? Colors.white : Colors.grey.shade400,
+                        width: 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${index + 1}',
+                        style: TextStyle(
+                          fontSize: isShortestRoute ? 14 : 12,
+                          fontWeight: FontWeight.bold,
+                          color: isShortestRoute ? Colors.white : Colors.black,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // Pulse effect for selected route
+                if (isSelectedRoute)
+                  AnimatedBuilder(
+                    animation: _pulseController,
+                    builder: (context, child) {
+                      return Container(
+                        width: 65 + (15 * _pulseAnimation.value),
+                        height: 65 + (15 * _pulseAnimation.value),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.2 * (1 - _pulseAnimation.value)),
+                          shape: BoxShape.circle,
+                        ),
+                      );
+                    },
+                  ),
+              ],
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Enhanced info card
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isShortestRoute 
+                    ? Colors.red 
+                    : isSelectedRoute 
+                        ? Colors.blue 
+                        : Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isShortestRoute 
+                      ? Colors.red 
+                      : isSelectedRoute 
+                          ? Colors.blue 
+                          : Colors.grey.shade300,
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Distance and priority
+                  Text(
+                    isShortestRoute ? "SHORTEST" : "${route['distance']?.toStringAsFixed(1) ?? '?'}km",
+                    style: TextStyle(
+                      fontSize: isShortestRoute ? 12 : 11,
+                      fontWeight: FontWeight.bold,
+                      color: isShortestRoute || isSelectedRoute ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  
+                  // Time estimate
+                  if (!isShortestRoute || route['travel_time'] != null)
+                    Text(
+                      route['travel_time'] ?? '',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isShortestRoute || isSelectedRoute 
+                            ? Colors.white.withOpacity(0.9) 
+                            : Colors.grey.shade600,
+                      ),
+                    ),
+                  
+                  // Special indicators
+                  if (isShortestRoute) ...[
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'FASTEST',
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+// Selected report marker with special styling
+Marker _buildSelectedReportMarker(ReportModel report, int index) {
+  return Marker(
+    point: LatLng(report.location.latitude, report.location.longitude),
+    width: 120,
+    height: 90,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Stack(
+          children: [
+            // Glow effect
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withOpacity(0.3),
+                shape: BoxShape.circle,
+              ),
+            ),
+            
+            // Main marker
+            Container(
+              width: 45,
+              height: 45,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryColor.withOpacity(0.4),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.check_circle,
+                color: Colors.white,
+                size: 25,
+              ),
+            ),
+            
+            // Selection indicator
+            Positioned(
+              top: -2,
+              right: -2,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1),
+                ),
+                child: const Icon(
+                  Icons.check,
+                  color: Colors.white,
+                  size: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        
+        const SizedBox(height: 6),
+        
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 3,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Text(
+            'Selected ${index + 1}',
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// Helper method to show route details in a snackbar
+void _showRouteDetailsSnackBar(Map<String, dynamic> route, int index, bool isShortestRoute) {
+  final destination = route['destination_details'] as Map<String, dynamic>? ?? {};
+  
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Row(
+        children: [
+          Icon(
+            isShortestRoute ? Icons.star : Icons.route,
+            color: Colors.white,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  isShortestRoute 
+                      ? 'Shortest Route Selected' 
+                      : 'Route ${index + 1} Selected',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  '${route['distance']?.toStringAsFixed(1) ?? '?'}km • ${route['travel_time'] ?? '?'}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: isShortestRoute ? Colors.red : AppTheme.primaryColor,
+      duration: const Duration(seconds: 3),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      action: SnackBarAction(
+        label: 'Details',
+        textColor: Colors.white,
+        onPressed: () {
+          // Show detailed route information
+          _showDetailedRouteDialog(route, index, isShortestRoute);
+        },
+      ),
+    ),
+  );
+}
+
+// Helper method to show detailed route dialog
+void _showDetailedRouteDialog(Map<String, dynamic> route, int index, bool isShortestRoute) {
+  final destination = route['destination_details'] as Map<String, dynamic>? ?? {};
+  
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      title: Row(
+        children: [
+          Icon(
+            isShortestRoute ? Icons.star : Icons.route,
+            color: isShortestRoute ? Colors.red : AppTheme.primaryColor,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              isShortestRoute ? 'Shortest Route' : 'Route ${index + 1}',
+              style: TextStyle(
+                color: isShortestRoute ? Colors.red : AppTheme.primaryColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDetailRow('Destination', destination['street_name'] ?? 'Water Supply Point'),
+          _buildDetailRow('Distance', '${route['distance']?.toStringAsFixed(1) ?? '?'} km'),
+          _buildDetailRow('Travel Time', route['travel_time'] ?? 'Unknown'),
+          _buildDetailRow('Address', destination['address'] ?? 'No address available'),
+          if (destination['point_of_interest'] != null)
+            _buildDetailRow('Info', destination['point_of_interest']),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(context);
+            // Navigate to this route or perform action
+          },
+          child: const Text('Navigate'),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildDetailRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            '$label:',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+      ],
+    ),
+  );
+}
   
   Marker _buildCurrentLocationMarker() {
     return Marker(

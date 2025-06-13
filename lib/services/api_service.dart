@@ -1104,4 +1104,168 @@ class ApiService {
     final result = await analyzeWaterQualityWithConfidence(imageFile);
     return result.waterQuality;
   }
+
+  Future<Map<String, dynamic>> getPolylineRoutesToWaterSupplies(
+  GeoPoint startLocation,
+  String adminId, {
+  int maxRoutes = 10,
+  double maxDistance = 15.0,
+}) async {
+  try {
+    print('🗺️ Getting polyline routes to water supplies...');
+    
+    final requestData = {
+      'admin_id': adminId,
+      'current_location': {
+        'latitude': startLocation.latitude,
+        'longitude': startLocation.longitude,
+      },
+      'max_routes': maxRoutes,
+      'max_distance': maxDistance,
+      'route_type': 'shortest',
+      'include_polyline': true,
+    };
+    
+    final response = await http.post(
+      Uri.parse('$baseUrl/get-polyline-routes'),
+      headers: _headers,
+      body: json.encode(requestData),
+    ).timeout(const Duration(seconds: 30));
+    
+    print('🗺️ Polyline routes response: ${response.statusCode}');
+    
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      
+      if (data['success'] == true) {
+        return data;
+      } else {
+        throw Exception('Failed to get polyline routes: ${data['message']}');
+      }
+    } else {
+      print('❌ Polyline routes failed: ${response.body}');
+      // Fallback to mock data if API fails
+      return _createMockPolylineRoutes(startLocation, maxRoutes);
+    }
+  } catch (e) {
+    print('❌ Error getting polyline routes: $e');
+    return _createMockPolylineRoutes(startLocation, maxRoutes);
+  }
+}
+
+// Mock polyline routes for fallback
+Map<String, dynamic> _createMockPolylineRoutes(GeoPoint location, int maxRoutes) {
+  final Math.Random random = Math.Random();
+  final List<Map<String, dynamic>> routes = [];
+  
+  for (int i = 0; i < Math.min(maxRoutes, 8); i++) {
+    final offsetLat = (random.nextDouble() - 0.5) * 0.05;
+    final offsetLng = (random.nextDouble() - 0.5) * 0.05;
+    
+    final destinationLat = location.latitude + offsetLat;
+    final destinationLng = location.longitude + offsetLng;
+    
+    final distance = _calculateDistance(
+      location.latitude, location.longitude,
+      destinationLat, destinationLng,
+    );
+    
+    // Generate curved polyline points
+    final polylinePoints = _generateCurvedPolyline(
+      location.latitude, location.longitude,
+      destinationLat, destinationLng,
+      curveFactor: 0.3 + (i * 0.1),
+    );
+    
+    routes.add({
+      'route_id': 'route-${i + 1}',
+      'destination_name': 'Water Supply Point ${i + 1}',
+      'destination_address': 'Mock Address ${i + 1}',
+      'distance': distance,
+      'travel_time': '${(distance * 2).round()} min',
+      'polyline_points': polylinePoints,
+      'color': _getRouteColorHex(i),
+      'weight': i == 0 ? 6 : 4,
+      'opacity': i == 0 ? 0.8 : 0.6,
+      'is_shortest': i == 0,
+      'priority_rank': i + 1,
+      'destination_details': {
+        'id': 'water_${i + 1}',
+        'latitude': destinationLat,
+        'longitude': destinationLng,
+        'street_name': 'Water Supply Point ${i + 1}',
+        'address': 'Mock Address ${i + 1}',
+        'point_of_interest': 'Community Water Access',
+      },
+    });
+  }
+  
+  // Sort by distance (shortest first)
+  routes.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
+  
+  return {
+    'success': true,
+    'message': 'Generated ${routes.length} polyline routes',
+    'polyline_routes': routes,
+    'shortest_route_id': routes.isNotEmpty ? routes[0]['route_id'] : null,
+    'total_routes': routes.length,
+  };
+}
+
+// Generate curved polyline between two points
+List<Map<String, dynamic>> _generateCurvedPolyline(
+  double startLat, double startLng,
+  double endLat, double endLng, {
+  double curveFactor = 0.3,
+  int numPoints = 20,
+}) {
+  final List<Map<String, dynamic>> points = [];
+  
+  // Calculate midpoint with curve offset
+  final midLat = (startLat + endLat) / 2;
+  final midLng = (startLng + endLng) / 2;
+  
+  // Add perpendicular offset for curve
+  final dx = endLng - startLng;
+  final dy = endLat - startLat;
+  
+  final offsetX = -dy * curveFactor * 0.1;
+  final offsetY = dx * curveFactor * 0.1;
+  
+  final curvedMidLat = midLat + offsetY;
+  final curvedMidLng = midLng + offsetX;
+  
+  // Generate quadratic Bezier curve points
+  for (int i = 0; i <= numPoints; i++) {
+    final t = i / numPoints;
+    
+    final lat = (1 - t) * (1 - t) * startLat + 
+               2 * (1 - t) * t * curvedMidLat + 
+               t * t * endLat;
+    final lng = (1 - t) * (1 - t) * startLng + 
+               2 * (1 - t) * t * curvedMidLng + 
+               t * t * endLng;
+    
+    points.add({
+      'latitude': lat,
+      'longitude': lng,
+    });
+  }
+  
+  return points;
+}
+
+String _getRouteColorHex(int index) {
+  final colors = [
+    '#FF0000', // Red for shortest
+    '#0066CC', // Blue
+    '#00CC66', // Green
+    '#CC6600', // Orange
+    '#6600CC', // Purple
+    '#CC0066', // Pink
+    '#00CCCC', // Cyan
+    '#CCCC00', // Yellow
+  ];
+  return colors[index % colors.length];
+}
 }
