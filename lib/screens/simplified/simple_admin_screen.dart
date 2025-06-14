@@ -1,4 +1,4 @@
-// lib/screens/simplified/simple_admin_screen.dart - CLEAN REDESIGN
+// lib/screens/simplified/simple_admin_screen.dart - REDESIGNED WITH LARGE MAP
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
@@ -19,9 +19,10 @@ class SimpleAdminScreen extends StatefulWidget {
 
 class _SimpleAdminScreenState extends State<SimpleAdminScreen> 
     with TickerProviderStateMixin {
-  late TabController _tabController;
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
+  AnimationController? _animationController;
+  AnimationController? _panelController;
+  Animation<double>? _fadeAnimation;
+  Animation<double>? _panelAnimation;
   
   bool _isLoading = false;
   bool _isLoadingRoutes = false;
@@ -35,38 +36,56 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   late LocationService _locationService;
   late ApiService _apiService;
   
-  // Dashboard state
-  int _selectedTabIndex = 0;
-  bool _showSystemInfo = true;
+  // UI state
+  bool _showInfoPanel = true;
+  bool _showSystemStats = false;
+  bool _isInfoPanelExpanded = false;
+  bool _showCreateReportPanel = false;
   
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    
+    // Initialize animation controllers
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 600),
       vsync: this,
     );
     
+    _panelController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    
+    // Initialize animations after controllers are ready
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
     ).animate(CurvedAnimation(
-      parent: _animationController,
+      parent: _animationController!,
       curve: Curves.easeInOut,
+    ));
+    
+    _panelAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _panelController!,
+      curve: Curves.easeOutBack,
     ));
     
     _locationService = Provider.of<LocationService>(context, listen: false);
     _apiService = Provider.of<ApiService>(context, listen: false);
     
+    // Start animations and initialization
     _initializeAdminDashboard();
-    _animationController.forward();
+    _animationController?.forward();
   }
   
   @override
   void dispose() {
-    _tabController.dispose();
-    _animationController.dispose();
+    _animationController?.dispose();
+    _panelController?.dispose();
     super.dispose();
   }
   
@@ -184,6 +203,11 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
       
       print('✅ Loaded ${routes.length} route networks');
       
+      // Show info panel after routes are loaded
+      if (_allRoutes.isNotEmpty) {
+        _panelController?.forward();
+      }
+      
     } catch (e) {
       print('❌ Failed to load route network: $e');
       setState(() {
@@ -202,430 +226,524 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey.shade50,
-      body: FadeTransition(
-        opacity: _fadeAnimation,
-        child: CustomScrollView(
-          slivers: [
-            // Modern App Bar
-            _buildModernAppBar(),
+      body: _fadeAnimation != null ? FadeTransition(
+        opacity: _fadeAnimation!,
+        child: Stack(
+          children: [
+            // MAIN MAP - Full screen background
+            _buildFullScreenMap(),
             
-            // Dashboard Content
-            SliverFillRemaining(
-              child: _isLoading
-                  ? _buildLoadingState()
-                  : _errorMessage != null
-                      ? _buildErrorState()
-                      : _buildDashboardContent(),
-            ),
+            // TOP STATUS BAR
+            _buildTopStatusBar(),
+            
+            // FLOATING ACTION BUTTON - Create Report
+            _buildCreateReportFAB(),
+            
+            // INFO PANEL - Bottom overlay
+            if (_showInfoPanel && _allRoutes.isNotEmpty)
+              _buildInfoPanel(),
+            
+            // SYSTEM STATS PANEL - Top right overlay
+            if (_showSystemStats)
+              _buildSystemStatsPanel(),
+            
+            // CREATE REPORT PANEL - Right side overlay
+            if (_showCreateReportPanel)
+              _buildCreateReportPanel(),
+            
+            // LOADING OVERLAY
+            if (_isLoading) _buildLoadingOverlay(),
+            
+            // ERROR OVERLAY
+            if (_errorMessage != null && !_isLoading) _buildErrorOverlay(),
           ],
+        ),
+      ) : Stack(
+        children: [
+          // MAIN MAP - Full screen background
+          _buildFullScreenMap(),
+          
+          // TOP STATUS BAR
+          _buildTopStatusBar(),
+          
+          // FLOATING ACTION BUTTON - Create Report
+          _buildCreateReportFAB(),
+          
+          // INFO PANEL - Bottom overlay
+          if (_showInfoPanel && _allRoutes.isNotEmpty)
+            _buildInfoPanel(),
+          
+          // SYSTEM STATS PANEL - Top right overlay
+          if (_showSystemStats)
+            _buildSystemStatsPanel(),
+          
+          // CREATE REPORT PANEL - Right side overlay
+          if (_showCreateReportPanel)
+            _buildCreateReportPanel(),
+          
+          // LOADING OVERLAY
+          if (_isLoading) _buildLoadingOverlay(),
+          
+          // ERROR OVERLAY
+          if (_errorMessage != null && !_isLoading) _buildErrorOverlay(),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildFullScreenMap() {
+    if (_currentLocation == null || _allRoutes.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.blue.shade100,
+              Colors.blue.shade50,
+            ],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.map_outlined,
+                size: 80,
+                color: Colors.grey.shade400,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Loading Map...',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    return OpenStreetMapWidget(
+      currentLocation: _currentLocation!,
+      polylineRoutes: _allRoutes,
+      isLoading: _isLoadingRoutes,
+    );
+  }
+  
+  Widget _buildTopStatusBar() {
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        padding: EdgeInsets.only(
+          top: MediaQuery.of(context).padding.top + 4,  // Reduced padding
+          left: 12,  // Reduced from 16
+          right: 12, // Reduced from 16
+          bottom: 4, // Reduced from 8
+        ),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withOpacity(0.6),  // Reduced opacity
+              Colors.transparent,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Row(
+            children: [
+              // ADMIN BADGE - Made smaller
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), // Reduced
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.orange, Colors.orange.shade600],
+                  ),
+                  borderRadius: BorderRadius.circular(16), // Reduced from 20
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.orange.withOpacity(0.3),
+                      blurRadius: 6, // Reduced from 8
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.admin_panel_settings, color: Colors.white, size: 14), // Reduced
+                    SizedBox(width: 4), // Reduced
+                    Text(
+                      'ADMIN',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10, // Reduced
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(width: 8), // Reduced from 12
+              
+              // CONNECTION STATUS - Made smaller
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), // Reduced
+                decoration: BoxDecoration(
+                  color: _backendConnected ? Colors.green : Colors.red,
+                  borderRadius: BorderRadius.circular(10), // Reduced from 12
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 4, // Reduced
+                      height: 4, // Reduced
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4), // Reduced
+                    Text(
+                      _backendConnected ? 'Online' : 'Offline',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9, // Reduced
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const Spacer(),
+              
+              // ACTION BUTTONS - Made smaller
+              Row(
+                children: [
+                  _buildTopActionButton(
+                    icon: _showSystemStats ? Icons.analytics : Icons.analytics_outlined,
+                    onPressed: () {
+                      setState(() {
+                        _showSystemStats = !_showSystemStats;
+                      });
+                    },
+                    isActive: _showSystemStats,
+                  ),
+                  
+                  const SizedBox(width: 6), // Reduced
+                  
+                  _buildTopActionButton(
+                    icon: Icons.refresh,
+                    onPressed: _refreshDashboard,
+                  ),
+                  
+                  const SizedBox(width: 6), // Reduced
+                  
+                  _buildTopActionButton(
+                    icon: Icons.more_vert,
+                    onPressed: _showMainMenu,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
   
-  Widget _buildModernAppBar() {
-    return SliverAppBar(
-      expandedHeight: 120,
-      floating: false,
-      pinned: true,
-      backgroundColor: Colors.orange,
-      elevation: 0,
-      flexibleSpace: FlexibleSpaceBar(
-        background: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.orange,
-                Colors.orange.shade700,
-              ],
+  Widget _buildTopActionButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    bool isActive = false,
+  }) {
+    return Material(
+      color: isActive ? Colors.white.withOpacity(0.2) : Colors.black.withOpacity(0.2), // Reduced opacity
+      borderRadius: BorderRadius.circular(6), // Reduced from 8
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.all(6), // Reduced from 8
+          child: Icon(
+            icon,
+            color: Colors.white,
+            size: 18, // Reduced from 20
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildCreateReportFAB() {
+    // Calculate bottom position based on panel state
+    double bottomPosition = 16;
+    if (_showInfoPanel && _allRoutes.isNotEmpty) {
+      bottomPosition = _isInfoPanelExpanded ? 280 : 140; // Adjust based on panel height
+    }
+    
+    return Positioned(
+      bottom: bottomPosition,
+      left: 16,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // INFO TOGGLE FAB - Made smaller
+          FloatingActionButton(
+            mini: true,
+            heroTag: "info_toggle",
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.orange,
+            onPressed: () {
+              setState(() {
+                _showInfoPanel = !_showInfoPanel;
+              });
+              if (_showInfoPanel) {
+                _panelController?.forward();
+              } else {
+                _panelController?.reverse();
+              }
+            },
+            child: Icon(_showInfoPanel ? Icons.info : Icons.info_outline, size: 18), // Smaller icon
+          ),
+          
+          const SizedBox(height: 8), // Reduced spacing
+          
+          // MAIN CREATE REPORT FAB - Compact design
+          Container(
+            height: 48, // Fixed height for consistency
+            child: FloatingActionButton.extended(
+              heroTag: "create_report",
+              onPressed: _backendConnected ? () {
+                setState(() {
+                  _showCreateReportPanel = !_showCreateReportPanel;
+                });
+              } : null,
+              backgroundColor: _backendConnected ? Colors.orange : Colors.grey,
+              foregroundColor: Colors.white,
+              icon: Icon(Icons.add_circle, size: 20), // Smaller icon
+              label: Text(
+                'Report',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14, // Smaller text
+                ),
+              ),
             ),
           ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildInfoPanel() {
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: _panelAnimation != null ? AnimatedBuilder(
+        animation: _panelAnimation!,
+        builder: (context, child) {
+          return Transform.translate(
+            offset: Offset(0, (1 - _panelAnimation!.value) * 200),
+            child: child,
+          );
+        },
+        child: _buildInfoPanelContent(),
+      ) : _buildInfoPanelContent(),
+    );
+  }
+  
+  Widget _buildInfoPanelContent() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)), // Reduced radius
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15), // Reduced shadow
+            blurRadius: 15, // Reduced blur
+            offset: Offset(0, -3), // Reduced offset
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // COMPACT PANEL HEADER
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _isInfoPanelExpanded = !_isInfoPanelExpanded;
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.all(12), // Reduced padding
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // DRAG HANDLE
+                  Container(
+                    width: 30, // Smaller handle
+                    height: 3, // Thinner handle
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 8), // Reduced spacing
+                  
+                  // COMPACT HEADER INFO
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(6), // Smaller padding
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.orange,
+                          borderRadius: BorderRadius.circular(6), // Smaller radius
                         ),
-                        child: Icon(
-                          Icons.admin_panel_settings,
-                          color: Colors.white,
-                          size: 24,
-                        ),
+                        child: Icon(Icons.water_drop, color: Colors.white, size: 16), // Smaller icon
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8), // Reduced spacing
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Admin Dashboard',
+                              'Water Supply Network',
                               style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
+                                fontSize: 14, // Smaller text
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             Text(
-                              'Water Supply Management System',
+                              '${_allRoutes.length} routes • Real-time data',
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
-                                fontSize: 14,
+                                color: Colors.grey.shade600,
+                                fontSize: 11, // Smaller text
                               ),
                             ),
                           ],
                         ),
                       ),
-                      _buildStatusIndicator(),
-                      const SizedBox(width: 8),
-                      _buildActionMenu(),
+                      Icon(
+                        _isInfoPanelExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: Colors.grey.shade600,
+                        size: 18, // Smaller icon
+                      ),
                     ],
                   ),
                 ],
               ),
             ),
           ),
-        ),
+          
+          // COMPACT EXPANDABLE CONTENT
+          if (_isInfoPanelExpanded) _buildCompactExpandedContent(),
+        ],
       ),
     );
   }
   
-  Widget _buildStatusIndicator() {
+  Widget _buildCompactExpandedContent() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: _backendConnected ? Colors.green : Colors.red,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: (_backendConnected ? Colors.green : Colors.red).withOpacity(0.3),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            _backendConnected ? 'Online' : 'Offline',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildActionMenu() {
-    return PopupMenuButton<String>(
-      icon: Icon(Icons.more_vert, color: Colors.white),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      onSelected: (value) {
-        switch (value) {
-          case 'refresh':
-            _refreshDashboard();
-            break;
-          case 'system_info':
-            setState(() => _showSystemInfo = !_showSystemInfo);
-            break;
-          case 'switch_role':
-            _showRoleSwitchDialog();
-            break;
-        }
-      },
-      itemBuilder: (context) => [
-        PopupMenuItem(
-          value: 'refresh',
-          child: Row(
-            children: [
-              Icon(Icons.refresh, size: 18, color: Colors.orange),
-              SizedBox(width: 12),
-              Text('Refresh Dashboard'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'system_info',
-          child: Row(
-            children: [
-              Icon(_showSystemInfo ? Icons.visibility_off : Icons.visibility, size: 18, color: Colors.blue),
-              SizedBox(width: 12),
-              Text(_showSystemInfo ? 'Hide System Info' : 'Show System Info'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'switch_role',
-          child: Row(
-            children: [
-              Icon(Icons.logout, size: 18, color: Colors.red),
-              SizedBox(width: 12),
-              Text('Switch Role'),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildLoadingState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 20,
-                  offset: Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                WaterDropLoader(message: 'Initializing Admin Dashboard...'),
-                const SizedBox(height: 16),
-                Text(
-                  'Loading water supply network and route data',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildErrorState() {
-    final isBackendError = _errorMessage!.contains('Backend') || _errorMessage!.contains('server');
-    
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Card(
-          elevation: 8,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: isBackendError ? Colors.orange.shade100 : Colors.red.shade100,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isBackendError ? Icons.cloud_off : Icons.error_outline,
-                    size: 40,
-                    color: isBackendError ? Colors.orange : Colors.red,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  isBackendError ? 'Backend System Offline' : 'Dashboard Error',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isBackendError ? Colors.orange : Colors.red,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _errorMessage!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.grey.shade700,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (context) => const RoleSelectionScreen()),
-                        ),
-                        icon: Icon(Icons.arrow_back),
-                        label: Text('Go Back'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _refreshDashboard,
-                        icon: Icon(Icons.refresh),
-                        label: Text('Retry'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildDashboardContent() {
-    return Column(
-      children: [
-        // System Overview Cards
-        if (_showSystemInfo) _buildSystemOverview(),
-        
-        // Main Dashboard Tabs
-        _buildDashboardTabs(),
-        
-        // Tab Content
-        Expanded(child: _buildTabContent()),
-      ],
-    );
-  }
-  
-  Widget _buildSystemOverview() {
-    return Container(
-      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), // Reduced padding
       child: Column(
         children: [
-          // Main Stats Row
+          Container(height: 1, color: Colors.grey.shade300), // Thinner divider
+          const SizedBox(height: 12), // Reduced spacing
+          
+          // COMPACT QUICK STATS ROW
           Row(
             children: [
-              Expanded(child: _buildStatCard(
-                'Data Points',
-                '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? _csvDataInfo?['total'] ?? 0}',
-                Icons.storage,
-                Colors.blue,
-              )),
-              const SizedBox(width: 12),
-              Expanded(child: _buildStatCard(
-                'Route Network',
-                '${_allRoutes.length}',
-                Icons.route,
-                Colors.green,
-              )),
-              const SizedBox(width: 12),
-              Expanded(child: _buildStatCard(
-                'Coverage',
-                'All Areas',
-                Icons.public,
-                Colors.purple,
-              )),
+              Expanded(child: _buildCompactStat('Data Points', '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? 0}', Colors.blue)),
+              Expanded(child: _buildCompactStat('Routes', '${_allRoutes.length}', Colors.green)),
+              Expanded(child: _buildCompactStat('Coverage', 'All Areas', Colors.purple)),
+              Expanded(child: _buildCompactStat('Status', _backendConnected ? 'Online' : 'Offline', _backendConnected ? Colors.green : Colors.red)),
             ],
           ),
           
-          const SizedBox(height: 12),
+          const SizedBox(height: 12), // Reduced spacing
           
-          // System Status Card
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _backendConnected ? Colors.green.shade100 : Colors.red.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      _backendConnected ? Icons.check_circle : Icons.error,
-                      color: _backendConnected ? Colors.green : Colors.red,
-                      size: 20,
-                    ),
+          // COMPACT SHORTEST ROUTE INFO
+          if (_allRoutes.isNotEmpty) _buildCompactShortestRouteInfo(),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildCompactStat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14, // Smaller text
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2), // Reduced spacing
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 9, // Smaller text
+            color: Colors.grey.shade600,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildCompactShortestRouteInfo() {
+    final shortestRoute = _allRoutes.first;
+    
+    return Container(
+      padding: const EdgeInsets.all(10), // Reduced padding
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.green.shade50, Colors.green.shade100.withOpacity(0.3)],
+        ),
+        borderRadius: BorderRadius.circular(8), // Smaller radius
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.star, color: Colors.green, size: 16), // Smaller icon
+          const SizedBox(width: 6), // Reduced spacing
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Shortest Route',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green.shade800,
+                    fontSize: 12, // Smaller text
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'System Status',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        Text(
-                          _backendConnected 
-                              ? 'All systems operational • Backend connected'
-                              : 'Backend offline • Limited functionality',
-                          style: TextStyle(
-                            color: _backendConnected ? Colors.green.shade700 : Colors.red.shade700,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
+                ),
+                Text(
+                  '${shortestRoute['distance']?.toStringAsFixed(1) ?? '?'} km • ${shortestRoute['travel_time'] ?? '?'}',
+                  style: TextStyle(
+                    color: Colors.green.shade600,
+                    fontSize: 10, // Smaller text
                   ),
-                  if (_allRoutes.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Ready',
-                        style: TextStyle(
-                          color: Colors.orange.shade700,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -633,164 +751,93 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     );
   }
   
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildDashboardTabs() {
+  Widget _buildExpandedPanelContent() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: TabBar(
-            controller: _tabController,
-            indicator: BoxDecoration(
-              color: Colors.orange,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.grey.shade600,
-            labelStyle: TextStyle(fontWeight: FontWeight.bold),
-            tabs: [
-              Tab(
-                icon: Icon(Icons.map, size: 20),
-                text: 'Network Map',
-              ),
-              Tab(
-                icon: Icon(Icons.add_circle, size: 20),
-                text: 'Create Report',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildTabContent() {
-    return TabBarView(
-      controller: _tabController,
-      children: [
-        _buildNetworkMapTab(),
-        _buildCreateReportTab(),
-      ],
-    );
-  }
-  
-  Widget _buildNetworkMapTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         children: [
-          // Map Info Card
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.map, color: Colors.blue, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Complete Water Supply Network',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        Text(
-                          'Interactive map showing all ${_allRoutes.length} water supply routes with real-time data',
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_isLoadingRoutes)
-                    SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+          
+          // QUICK STATS ROW
+          Row(
+            children: [
+              Expanded(child: _buildQuickStat('Data Points', '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? 0}', Colors.blue)),
+              Expanded(child: _buildQuickStat('Routes', '${_allRoutes.length}', Colors.green)),
+              Expanded(child: _buildQuickStat('Coverage', 'All Areas', Colors.purple)),
+              Expanded(child: _buildQuickStat('Status', _backendConnected ? 'Online' : 'Offline', _backendConnected ? Colors.green : Colors.red)),
+            ],
           ),
           
           const SizedBox(height: 16),
           
-          // Interactive Map
+          // SHORTEST ROUTE INFO
+          if (_allRoutes.isNotEmpty) _buildShortestRouteInfo(),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildQuickStat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: Colors.grey.shade600,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildShortestRouteInfo() {
+    final shortestRoute = _allRoutes.first;
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.green.shade50, Colors.green.shade100.withOpacity(0.3)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.star, color: Colors.green, size: 20),
+          const SizedBox(width: 8),
           Expanded(
-            child: Card(
-              elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: _currentLocation != null && _allRoutes.isNotEmpty
-                    ? OpenStreetMapWidget(
-                        currentLocation: _currentLocation!,
-                        polylineRoutes: _allRoutes,
-                        isLoading: _isLoadingRoutes,
-                      )
-                    : _buildMapPlaceholder(),
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Shortest Route',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green.shade800,
+                    fontSize: 14,
+                  ),
+                ),
+                Text(
+                  '${shortestRoute['distance']?.toStringAsFixed(1) ?? '?'} km • ${shortestRoute['travel_time'] ?? '?'}',
+                  style: TextStyle(
+                    color: Colors.green.shade600,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -798,260 +845,414 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     );
   }
   
-  Widget _buildMapPlaceholder() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Center(
+  Widget _buildSystemStatsPanel() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 60, // Avoid top status bar
+      right: 12,
+      child: Container(
+        width: 200, // Reduced width
+        padding: const EdgeInsets.all(12), // Reduced padding
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.95), // Slightly transparent
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15), // Reduced shadow
+              blurRadius: 8, // Reduced blur
+              offset: Offset(0, 3), // Reduced offset
+            ),
+          ],
+        ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.map_outlined,
-              size: 64,
-              color: Colors.grey.shade400,
+            Row(
+              children: [
+                Icon(Icons.analytics, color: Colors.orange, size: 16), // Smaller icon
+                const SizedBox(width: 6), // Reduced spacing
+                Text(
+                  'System Stats',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14, // Smaller text
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setState(() => _showSystemStats = false),
+                  child: Icon(Icons.close, size: 14, color: Colors.grey), // Smaller close button
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Loading Network Map...',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey.shade600,
-              ),
-            ),
+            
+            const SizedBox(height: 8), // Reduced spacing
+            Container(height: 1, color: Colors.grey.shade300), // Thinner divider
             const SizedBox(height: 8),
-            Text(
-              'Preparing water supply route visualization',
-              style: TextStyle(
-                color: Colors.grey.shade500,
-                fontSize: 14,
-              ),
-            ),
+            
+            _buildStatRow('Backend', _backendConnected ? 'Connected' : 'Offline', _backendConnected ? Colors.green : Colors.red),
+            _buildStatRow('Location', _currentLocation != null ? 'Active' : 'Inactive', _currentLocation != null ? Colors.green : Colors.orange),
+            _buildStatRow('Routes', '${_allRoutes.length}', Colors.blue),
+            _buildStatRow('Data Points', '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? 0}', Colors.purple),
+            _buildStatRow('Status', _isLoadingRoutes ? 'Loading...' : 'Ready', _isLoadingRoutes ? Colors.orange : Colors.green),
           ],
         ),
       ),
     );
   }
   
-  Widget _buildCreateReportTab() {
+  Widget _buildStatRow(String label, String value, Color valueColor) {
     return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
+      padding: const EdgeInsets.symmetric(vertical: 2), // Reduced padding
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Admin Report Info
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.orange.shade50,
-                    Colors.orange.shade100.withOpacity(0.3),
-                  ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11, // Smaller text
+              color: Colors.grey.shade700,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 11, // Smaller text
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildCreateReportPanel() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 60, // Avoid top status bar
+      bottom: _showInfoPanel ? 160 : 80, // Avoid bottom elements
+      right: 12,
+      child: Container(
+        width: 260, // Reduced width
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.orange.shade50,
+              Colors.orange.shade100.withOpacity(0.3),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(12), // Reduced radius
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15), // Reduced shadow
+              blurRadius: 10, // Reduced blur
+              offset: Offset(0, 3), // Reduced offset
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            // COMPACT HEADER
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6), // Reduced padding
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.orange, Colors.orange.shade600],
+                    ),
+                    borderRadius: BorderRadius.circular(6), // Reduced radius
+                  ),
+                  child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 16), // Smaller icon
                 ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Colors.orange, Colors.orange.shade600],
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            Icons.admin_panel_settings,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Admin Report Creation',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Create detailed reports with admin privileges and full system access',
-                                style: TextStyle(
-                                  color: Colors.orange.shade800,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _backendConnected ? Colors.green : Colors.red,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _backendConnected ? 'Ready' : 'Offline',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                const SizedBox(width: 8), // Reduced spacing
+                Expanded(
+                  child: Text(
+                    'Admin Report',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14, // Smaller text
+                    ),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => setState(() => _showCreateReportPanel = false),
+                  child: Icon(Icons.close, size: 14, color: Colors.grey), // Smaller close
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // COMPACT CONTENT
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 60, // Smaller icon container
+                    height: 60,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.orange, Colors.orange.shade600],
+                      ),
+                      borderRadius: BorderRadius.circular(15), // Reduced radius
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.orange.withOpacity(0.3),
+                          blurRadius: 10, // Reduced blur
+                          offset: Offset(0, 3), // Reduced offset
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Create Report Action
-          Expanded(
-            child: Card(
-              elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: InkWell(
-                onTap: _backendConnected 
-                    ? () {
+                    child: Icon(
+                      Icons.add_circle,
+                      size: 30, // Smaller icon
+                      color: Colors.white,
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 12), // Reduced spacing
+                  
+                  Text(
+                    'Create Admin Report',
+                    style: TextStyle(
+                      fontSize: 16, // Smaller title
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 8), // Reduced spacing
+                  
+                  Text(
+                    'Enhanced AI analysis with admin-level data access.',
+                    style: TextStyle(
+                      color: Colors.grey.shade700,
+                      fontSize: 12, // Smaller description
+                      height: 1.3,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  
+                  const SizedBox(height: 16), // Reduced spacing
+                  
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _backendConnected ? () {
+                        setState(() => _showCreateReportPanel = false);
                         Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (context) => SimpleReportScreen(isAdmin: true),
                           ),
                         );
-                      }
-                    : null,
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white,
-                        Colors.orange.shade50.withOpacity(0.3),
-                      ],
+                      } : null,
+                      icon: Icon(Icons.admin_panel_settings, size: 16), // Smaller icon
+                      label: Text(
+                        'Start Creating',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12, // Smaller text
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _backendConnected ? Colors.orange : Colors.grey,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 8), // Reduced padding
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8), // Reduced radius
+                        ),
+                      ),
                     ),
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: _backendConnected 
-                                  ? [Colors.orange, Colors.orange.shade600]
-                                  : [Colors.grey.shade400, Colors.grey.shade500],
-                            ),
-                            borderRadius: BorderRadius.circular(30),
-                            boxShadow: [
-                              BoxShadow(
-                                color: (_backendConnected ? Colors.orange : Colors.grey).withOpacity(0.3),
-                                blurRadius: 20,
-                                offset: Offset(0, 10),
-                              ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.add_circle,
-                            size: 60,
-                            color: Colors.white,
-                          ),
-                        ),
-                        
-                        const SizedBox(height: 32),
-                        
-                        Text(
-                          'Create Admin Report',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: _backendConnected ? Colors.black87 : Colors.grey.shade500,
-                          ),
-                        ),
-                        
-                        const SizedBox(height: 12),
-                        
-                        Text(
-                          _backendConnected 
-                              ? 'Create comprehensive water quality reports with enhanced AI analysis and admin-level data access'
-                              : 'Backend connection required for report creation. Please ensure the Python server is running.',
-                          style: TextStyle(
-                            color: _backendConnected ? Colors.grey.shade600 : Colors.grey.shade500,
-                            fontSize: 16,
-                            height: 1.4,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        
-                        const SizedBox(height: 32),
-                        
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: _backendConnected ? Colors.orange : Colors.grey.shade400,
-                            borderRadius: BorderRadius.circular(25),
-                            boxShadow: [
-                              BoxShadow(
-                                color: (_backendConnected ? Colors.orange : Colors.grey).withOpacity(0.3),
-                                blurRadius: 10,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _backendConnected ? Icons.admin_panel_settings : Icons.cloud_off,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                _backendConnected ? 'Admin Access Ready' : 'Backend Offline',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildLoadingOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.7),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 20,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              WaterDropLoader(message: 'Initializing Admin Dashboard...'),
+              const SizedBox(height: 16),
+              Text(
+                'Loading water supply network and route data',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildErrorOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.8),
+      child: Center(
+        child: Container(
+          margin: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 20,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 60,
+                color: Colors.red,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Dashboard Error',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _errorMessage!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey.shade700,
+                    height: 1.4,
                   ),
                 ),
               ),
-            ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (context) => const RoleSelectionScreen()),
+                      ),
+                      icon: Icon(Icons.arrow_back),
+                      label: Text('Go Back'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _refreshDashboard,
+                      icon: Icon(Icons.refresh),
+                      label: Text('Retry'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+  
+  void _showMainMenu() {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Admin Menu',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: Icon(Icons.refresh, color: Colors.orange),
+              title: Text('Refresh Dashboard'),
+              onTap: () {
+                Navigator.pop(context);
+                _refreshDashboard();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.analytics, color: Colors.blue),
+              title: Text('System Statistics'),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _showSystemStats = !_showSystemStats);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.logout, color: Colors.red),
+              title: Text('Switch Role'),
+              onTap: () {
+                Navigator.pop(context);
+                _showRoleSwitchDialog();
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
