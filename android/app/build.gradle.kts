@@ -6,9 +6,10 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+
 dependencies {
   // Import the Firebase BoM
-  implementation(platform("com.google.firebase:firebase-bom:33.13.0"))
+  implementation(platform("com.google.firebase:firebase-bom:33.11.0"))
 
 
   // TODO: Add the dependencies for Firebase products you want to use
@@ -39,7 +40,7 @@ android {
         applicationId = "com.example.aquascan"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 23
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

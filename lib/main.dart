@@ -41,8 +41,11 @@ class MyApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
+
         title: 'Water Quality Monitor - Simple',
-        theme: AppTheme.lightTheme,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue,dynamicSchemeVariant: DynamicSchemeVariant.vibrant)
+        ),
         home: RoleSelectionScreen(),
         debugShowCheckedModeBanner: false,
       ),
