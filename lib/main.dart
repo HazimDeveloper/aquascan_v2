@@ -1,4 +1,4 @@
-// lib/main.dart - SIMPLIFIED VERSION (No Authentication)
+// lib/main.dart - SIMPLIFIED VERSION (No Authentication) - FIXED
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
@@ -41,10 +41,14 @@ class MyApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-
         title: 'Water Quality Monitor - Simple',
+        // FIXED: Remove the problematic dynamicSchemeVariant parameter
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue,dynamicSchemeVariant: DynamicSchemeVariant.vibrant)
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.blue,
+            brightness: Brightness.light,
+          ),
+          useMaterial3: true,
         ),
         home: RoleSelectionScreen(),
         debugShowCheckedModeBanner: false,

@@ -72,26 +72,19 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-
-# Critical: Fix for SchemeRainbow/SchemeFruitSalad error
+# FIXED: Updated dependency overrides to resolve SchemeRainbow/SchemeFruitSalad errors
 dependency_overrides:
-  # Material Design 3 fixes
-  material_color_utilities: ^0.8.0
-
-  # Core collection fix
+  # Material utilities - use latest stable version
+  material_color_utilities: ^0.11.1
+  
+  # Collection fix for compatibility
   collection: ^1.18.0
-
-  # Web compatibility
-  web: ^0.5.1
-
-  # Fix for dynamic_color package conflicts
+  
+  # Meta package version alignment
+  meta: ^1.15.0
+  
+  # Web compatibility for latest Flutter
+  web: ^1.1.0
+  
+  # Dynamic color package - use compatible version
   dynamic_color: ^1.7.0
-
-  # Meta package version fix
-  meta: ^1.12.0
-
-  # Analyzer fix
-  analyzer: ^6.4.1
-
-  # Platform fix
-  platform: ^3.1.4
