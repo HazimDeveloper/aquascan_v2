@@ -1,4 +1,5 @@
-import 'package:cloud_firestore/cloud_firestore.dart' hide GeoPoint;
+// lib/models/route_model.dart - FIXED FOR LOCAL STORAGE ONLY
+// Removed Firebase dependencies
 import 'package:aquascan/models/report_model.dart';
 
 class RouteModel {
@@ -98,33 +99,45 @@ class RouteModel {
         }).toList();
       }
 
-      // Create DateTime from Timestamp or fallback
+      // FIXED: Handle dates without Firebase Timestamp
       DateTime createdAt = DateTime.now();
       if (json['createdAt'] != null) {
-        if (json['createdAt'] is Timestamp) {
-          createdAt = (json['createdAt'] as Timestamp).toDate();
-        } else if (json['createdAt'] is int) {
-          createdAt = DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int);
-        } else if (json['createdAt'] is String) {
+        final createdAtValue = json['createdAt'];
+        if (createdAtValue is String) {
           try {
-            createdAt = DateTime.parse(json['createdAt'] as String);
+            createdAt = DateTime.parse(createdAtValue);
           } catch (e) {
-            print('Error parsing createdAt date: $e');
+            print('Error parsing createdAt: $e');
+          }
+        } else if (createdAtValue is int) {
+          createdAt = DateTime.fromMillisecondsSinceEpoch(createdAtValue);
+        } else {
+          // Handle Timestamp if it somehow exists
+          try {
+            createdAt = (createdAtValue as dynamic).toDate();
+          } catch (e) {
+            print('Error parsing createdAt timestamp: $e');
           }
         }
       }
 
       DateTime updatedAt = DateTime.now();
       if (json['updatedAt'] != null) {
-        if (json['updatedAt'] is Timestamp) {
-          updatedAt = (json['updatedAt'] as Timestamp).toDate();
-        } else if (json['updatedAt'] is int) {
-          updatedAt = DateTime.fromMillisecondsSinceEpoch(json['updatedAt'] as int);
-        } else if (json['updatedAt'] is String) {
+        final updatedAtValue = json['updatedAt'];
+        if (updatedAtValue is String) {
           try {
-            updatedAt = DateTime.parse(json['updatedAt'] as String);
+            updatedAt = DateTime.parse(updatedAtValue);
           } catch (e) {
-            print('Error parsing updatedAt date: $e');
+            print('Error parsing updatedAt: $e');
+          }
+        } else if (updatedAtValue is int) {
+          updatedAt = DateTime.fromMillisecondsSinceEpoch(updatedAtValue);
+        } else {
+          // Handle Timestamp if it somehow exists
+          try {
+            updatedAt = (updatedAtValue as dynamic).toDate();
+          } catch (e) {
+            print('Error parsing updatedAt timestamp: $e');
           }
         }
       }
@@ -158,6 +171,7 @@ class RouteModel {
     }
   }
 
+  // FIXED: Store dates as ISO strings
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -166,8 +180,8 @@ class RouteModel {
       'points': points.map((point) => point.toJson()).toList(),
       'segments': segments.map((segment) => segment.toJson()).toList(),
       'totalDistance': totalDistance,
-      'createdAt': createdAt,
-      'updatedAt': updatedAt,
+      'createdAt': createdAt.toIso8601String(), // Store as ISO string
+      'updatedAt': updatedAt.toIso8601String(), // Store as ISO string
     };
   }
 

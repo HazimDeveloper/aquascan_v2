@@ -1,9 +1,7 @@
-// lib/main.dart - SIMPLIFIED VERSION (No Authentication) - FIXED
+// lib/main.dart - COMPLETELY REMOVED FIREBASE
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'config/theme.dart';
-import 'firebase_options.dart';
 import 'screens/simplified/role_selection_screen.dart';
 import 'services/database_service.dart';
 import 'services/storage_service.dart';
@@ -12,9 +10,10 @@ import 'services/api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // await Firebase.initializeApp(
-  //   options: DefaultFirebaseOptions.currentPlatform,
-  // );
+  
+  // REMOVED: Firebase initialization completely
+  // No Firebase needed for local storage version
+  
   runApp(MyApp());
 }
 
@@ -41,8 +40,7 @@ class MyApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-        title: 'Water Quality Monitor - Simple',
-        // FIXED: Remove the problematic dynamicSchemeVariant parameter
+        title: 'AquaScan - Local Storage',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
             seedColor: Colors.blue,

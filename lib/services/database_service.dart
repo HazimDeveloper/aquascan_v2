@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - LOCAL STORAGE ONLY VERSION
+// lib/services/database_service.dart - FINAL CHECK - 100% LOCAL STORAGE
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
@@ -49,7 +49,14 @@ class DatabaseService {
       }
       
       final List<dynamic> jsonList = json.decode(contents);
-      final reports = jsonList.map((json) => ReportModel.fromJson(json)).toList();
+      final reports = jsonList.map((json) {
+        try {
+          return ReportModel.fromJson(json);
+        } catch (e) {
+          _logDebug('Error parsing report: $e');
+          return null;
+        }
+      }).where((report) => report != null).cast<ReportModel>().toList();
       
       _logDebug('Loaded ${reports.length} reports from local storage');
       return reports;
@@ -64,7 +71,15 @@ class DatabaseService {
   Future<void> _saveAllReports(List<ReportModel> reports) async {
     try {
       final file = await _getReportsFile();
-      final jsonList = reports.map((report) => report.toJson()).toList();
+      final jsonList = reports.map((report) {
+        try {
+          return report.toJson();
+        } catch (e) {
+          _logDebug('Error converting report to JSON: $e');
+          return null;
+        }
+      }).where((json) => json != null).toList();
+      
       await file.writeAsString(json.encode(jsonList));
       
       _logDebug('Saved ${reports.length} reports to local storage');
@@ -79,15 +94,20 @@ class DatabaseService {
     try {
       _logDebug('Creating new report: ${report.title}');
       
-      // Generate unique ID
+      // Generate unique ID using timestamp and random suffix
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final reportId = 'report_${timestamp}_${report.userId.replaceAll('-', '')}';
+      final randomSuffix = (timestamp % 10000).toString().padLeft(4, '0');
+      final reportId = 'local_${timestamp}_$randomSuffix';
       
       // Load existing reports
       final allReports = await _loadAllReports();
       
-      // Create report with ID
-      final reportWithId = report.copyWith(id: reportId);
+      // Create report with ID and ensure proper timestamps
+      final reportWithId = report.copyWith(
+        id: reportId,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
       
       // Add to list
       allReports.add(reportWithId);
@@ -95,11 +115,17 @@ class DatabaseService {
       // Save back to storage
       await _saveAllReports(allReports);
       
-      _logDebug('Report created successfully with ID: $reportId');
+      _logDebug('✅ Report created successfully with ID: $reportId');
+      _logDebug('   Title: ${reportWithId.title}');
+      _logDebug('   User: ${reportWithId.userName}');
+      _logDebug('   Images: ${reportWithId.imageUrls.length}');
+      _logDebug('   Location: ${reportWithId.location.latitude}, ${reportWithId.location.longitude}');
+      
       return reportId;
       
-    } catch (e) {
-      _logDebug('Error creating report: $e');
+    } catch (e, stackTrace) {
+      _logDebug('❌ Error creating report: $e');
+      _logDebug('Stack trace: $stackTrace');
       throw Exception('Failed to create report: $e');
     }
   }
@@ -206,22 +232,18 @@ class DatabaseService {
         throw Exception('Report not found');
       }
       
-      // Get current report
+      // Get current report and update fields
       final currentReport = allReports[reportIndex];
       
-      // Update fields
-      final updatedReport = ReportModel(
-        id: currentReport.id,
+      final updatedReport = currentReport.copyWith(
         userId: data['userId'] ?? currentReport.userId,
         userName: data['userName'] ?? currentReport.userName,
         title: data['title'] ?? currentReport.title,
         description: data['description'] ?? currentReport.description,
-        location: currentReport.location,
         address: data['address'] ?? currentReport.address,
         imageUrls: data['imageUrls'] ?? currentReport.imageUrls,
-        waterQuality: currentReport.waterQuality,
+        waterQuality: data['waterQuality'] ?? currentReport.waterQuality,
         isResolved: data['isResolved'] ?? currentReport.isResolved,
-        createdAt: currentReport.createdAt,
         updatedAt: DateTime.now(),
       );
       

@@ -1,5 +1,5 @@
-// lib/models/user_model.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/user_model.dart - FIXED FOR LOCAL STORAGE
+// Removed all Firebase dependencies
 
 class UserModel {
   final String uid;
@@ -23,18 +23,62 @@ class UserModel {
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
+    // FIXED: Handle dates without Firebase Timestamp
+    DateTime createdAt = DateTime.now();
+    if (json['createdAt'] != null) {
+      final createdAtValue = json['createdAt'];
+      if (createdAtValue is String) {
+        try {
+          createdAt = DateTime.parse(createdAtValue);
+        } catch (e) {
+          print('Error parsing createdAt: $e');
+        }
+      } else if (createdAtValue is int) {
+        createdAt = DateTime.fromMillisecondsSinceEpoch(createdAtValue);
+      } else {
+        // Handle Timestamp if it somehow exists
+        try {
+          createdAt = (createdAtValue as dynamic).toDate();
+        } catch (e) {
+          print('Error parsing createdAt timestamp: $e');
+        }
+      }
+    }
+
+    DateTime updatedAt = DateTime.now();
+    if (json['updatedAt'] != null) {
+      final updatedAtValue = json['updatedAt'];
+      if (updatedAtValue is String) {
+        try {
+          updatedAt = DateTime.parse(updatedAtValue);
+        } catch (e) {
+          print('Error parsing updatedAt: $e');
+        }
+      } else if (updatedAtValue is int) {
+        updatedAt = DateTime.fromMillisecondsSinceEpoch(updatedAtValue);
+      } else {
+        // Handle Timestamp if it somehow exists
+        try {
+          updatedAt = (updatedAtValue as dynamic).toDate();
+        } catch (e) {
+          print('Error parsing updatedAt timestamp: $e');
+        }
+      }
+    }
+
     return UserModel(
-      uid: json['uid'] as String,
-      name: json['name'] as String,
-      email: json['email'] as String,
-      photoUrl: json['photoUrl'] as String?,
-      address: json['address'] as String?,
-      role: json['role'] as String,
-      createdAt: (json['createdAt'] as Timestamp).toDate(),
-      updatedAt: (json['updatedAt'] as Timestamp).toDate(),
+      uid: json['uid']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      photoUrl: json['photoUrl']?.toString(),
+      address: json['address']?.toString(),
+      role: json['role']?.toString() ?? 'user',
+      createdAt: createdAt,
+      updatedAt: updatedAt,
     );
   }
 
+  // FIXED: Store dates as ISO strings
   Map<String, dynamic> toJson() {
     return {
       'uid': uid,
@@ -43,8 +87,8 @@ class UserModel {
       'photoUrl': photoUrl,
       'address': address,
       'role': role,
-      'createdAt': createdAt,
-      'updatedAt': updatedAt,
+      'createdAt': createdAt.toIso8601String(), // Store as ISO string
+      'updatedAt': updatedAt.toIso8601String(), // Store as ISO string
     };
   }
 

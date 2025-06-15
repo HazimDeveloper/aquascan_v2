@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as Math;
 import 'package:http/http.dart' as http;
-import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
-import 'package:aquascan/models/route_model.dart' show RouteModel;
 import 'package:aquascan/utils/water_quality_utils.dart';
 import '../models/report_model.dart';
 

@@ -1,5 +1,5 @@
-// lib/models/report_model.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/report_model.dart - FIXED FOR LOCAL STORAGE ONLY
+// Removed all Firebase dependencies
 
 enum WaterQualityState {
   highPh,       // 'HIGH_PH'
@@ -11,8 +11,6 @@ enum WaterQualityState {
   unknown       // Default fallback
 }
 
-
-
 class GeoPoint {
   final double latitude;
   final double longitude;
@@ -22,34 +20,32 @@ class GeoPoint {
     required this.longitude,
   });
 
- // In the GeoPoint class
-
-factory GeoPoint.fromJson(Map<String, dynamic> json) {
-  double lat = 0.0;
-  double lng = 0.0;
-  
-  try {
-    if (json.containsKey('latitude') && json['latitude'] != null) {
-      lat = json['latitude'] is double
-          ? json['latitude'] as double
-          : (json['latitude'] as num).toDouble();
+  factory GeoPoint.fromJson(Map<String, dynamic> json) {
+    double lat = 0.0;
+    double lng = 0.0;
+    
+    try {
+      if (json.containsKey('latitude') && json['latitude'] != null) {
+        lat = json['latitude'] is double
+            ? json['latitude'] as double
+            : (json['latitude'] as num).toDouble();
+      }
+      
+      if (json.containsKey('longitude') && json['longitude'] != null) {
+        lng = json['longitude'] is double
+            ? json['longitude'] as double
+            : (json['longitude'] as num).toDouble();
+      }
+    } catch (e) {
+      print('Error parsing GeoPoint coordinates: $e');
+      // Use defaults
     }
     
-    if (json.containsKey('longitude') && json['longitude'] != null) {
-      lng = json['longitude'] is double
-          ? json['longitude'] as double
-          : (json['longitude'] as num).toDouble();
-    }
-  } catch (e) {
-    print('Error parsing GeoPoint coordinates: $e');
-    // Use defaults
+    return GeoPoint(
+      latitude: lat,
+      longitude: lng,
+    );
   }
-  
-  return GeoPoint(
-    latitude: lat,
-    longitude: lng,
-  );
-}
 
   Map<String, dynamic> toJson() {
     return {
@@ -88,42 +84,131 @@ class ReportModel {
     required this.updatedAt,
   });
 
-static WaterQualityState getStateFromString(String stateString) {
-  switch (stateString.toUpperCase()) {
-    case 'HIGH_PH':
-      return WaterQualityState.highPh;
-    case 'HIGH_PH; HIGH_TEMP':
-      return WaterQualityState.highPhTemp;
-    case 'LOW_PH':
-      return WaterQualityState.lowPh;
-    case 'LOW_TEMP':
-      return WaterQualityState.lowTemp;
-    case 'LOW_TEMP;HIGH_PH':
-      return WaterQualityState.lowTempHighPh;
-    case 'OPTIMUM':
-      return WaterQualityState.optimum;
-    default:
-      return WaterQualityState.unknown;
+  static WaterQualityState getStateFromString(String stateString) {
+    switch (stateString.toUpperCase()) {
+      case 'HIGH_PH':
+        return WaterQualityState.highPh;
+      case 'HIGH_PH; HIGH_TEMP':
+        return WaterQualityState.highPhTemp;
+      case 'LOW_PH':
+        return WaterQualityState.lowPh;
+      case 'LOW_TEMP':
+        return WaterQualityState.lowTemp;
+      case 'LOW_TEMP;HIGH_PH':
+        return WaterQualityState.lowTempHighPh;
+      case 'OPTIMUM':
+        return WaterQualityState.optimum;
+      default:
+        return WaterQualityState.unknown;
+    }
   }
-}
 
+  // FIXED: Handle both Firebase and local storage formats
   factory ReportModel.fromJson(Map<String, dynamic> json) {
-    return ReportModel(
-      id: json['id'] as String,
-      userId: json['userId'] as String,
-      userName: json['userName'] as String,
-      title: json['title'] as String,
-      description: json['description'] as String,
-      location: GeoPoint.fromJson(json['location'] as Map<String, dynamic>),
-      address: json['address'] as String,
-      imageUrls: List<String>.from(json['imageUrls'] as List),
-      waterQuality: WaterQualityState.values[json['waterQuality'] as int],
-      isResolved: json['isResolved'] as bool,
-      createdAt: (json['createdAt'] as Timestamp).toDate(),
-      updatedAt: (json['updatedAt'] as Timestamp).toDate(),
-    );
+    try {
+      // Handle dates - support both Timestamp and String/int formats
+      DateTime createdAt = DateTime.now();
+      DateTime updatedAt = DateTime.now();
+      
+      // Parse createdAt
+      if (json['createdAt'] != null) {
+        final createdAtValue = json['createdAt'];
+        if (createdAtValue is String) {
+          try {
+            createdAt = DateTime.parse(createdAtValue);
+          } catch (e) {
+            print('Error parsing createdAt string: $e');
+          }
+        } else if (createdAtValue is int) {
+          createdAt = DateTime.fromMillisecondsSinceEpoch(createdAtValue);
+        } else {
+          // Handle Timestamp from Firestore (if exists)
+          try {
+            createdAt = (createdAtValue as dynamic).toDate();
+          } catch (e) {
+            print('Error parsing createdAt timestamp: $e');
+          }
+        }
+      }
+      
+      // Parse updatedAt
+      if (json['updatedAt'] != null) {
+        final updatedAtValue = json['updatedAt'];
+        if (updatedAtValue is String) {
+          try {
+            updatedAt = DateTime.parse(updatedAtValue);
+          } catch (e) {
+            print('Error parsing updatedAt string: $e');
+          }
+        } else if (updatedAtValue is int) {
+          updatedAt = DateTime.fromMillisecondsSinceEpoch(updatedAtValue);
+        } else {
+          // Handle Timestamp from Firestore (if exists)
+          try {
+            updatedAt = (updatedAtValue as dynamic).toDate();
+          } catch (e) {
+            print('Error parsing updatedAt timestamp: $e');
+          }
+        }
+      }
+      
+      // Handle water quality state
+      WaterQualityState waterQuality = WaterQualityState.unknown;
+      if (json['waterQuality'] != null) {
+        final waterQualityValue = json['waterQuality'];
+        if (waterQualityValue is int) {
+          // Handle enum index
+          if (waterQualityValue >= 0 && waterQualityValue < WaterQualityState.values.length) {
+            waterQuality = WaterQualityState.values[waterQualityValue];
+          }
+        } else if (waterQualityValue is String) {
+          // Handle string representation
+          waterQuality = getStateFromString(waterQualityValue);
+        }
+      }
+      
+      return ReportModel(
+        id: json['id']?.toString() ?? '',
+        userId: json['userId']?.toString() ?? '',
+        userName: json['userName']?.toString() ?? '',
+        title: json['title']?.toString() ?? '',
+        description: json['description']?.toString() ?? '',
+        location: json['location'] != null 
+            ? GeoPoint.fromJson(json['location'] as Map<String, dynamic>)
+            : GeoPoint(latitude: 0, longitude: 0),
+        address: json['address']?.toString() ?? '',
+        imageUrls: json['imageUrls'] != null 
+            ? List<String>.from(json['imageUrls'] as List)
+            : [],
+        waterQuality: waterQuality,
+        isResolved: json['isResolved'] == true,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+      );
+    } catch (e, stackTrace) {
+      print('Error in ReportModel.fromJson: $e');
+      print('Stack trace: $stackTrace');
+      print('JSON data: $json');
+      
+      // Return a minimal valid model
+      return ReportModel(
+        id: json['id']?.toString() ?? 'error_${DateTime.now().millisecondsSinceEpoch}',
+        userId: json['userId']?.toString() ?? 'unknown',
+        userName: json['userName']?.toString() ?? 'Unknown User',
+        title: json['title']?.toString() ?? 'Error Loading Report',
+        description: json['description']?.toString() ?? 'Could not load report data',
+        location: GeoPoint(latitude: 0, longitude: 0),
+        address: json['address']?.toString() ?? 'Unknown Location',
+        imageUrls: [],
+        waterQuality: WaterQualityState.unknown,
+        isResolved: false,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+    }
   }
 
+  // FIXED: Store dates as ISO strings for local storage
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -136,8 +221,8 @@ static WaterQualityState getStateFromString(String stateString) {
       'imageUrls': imageUrls,
       'waterQuality': waterQuality.index,
       'isResolved': isResolved,
-      'createdAt': createdAt,
-      'updatedAt': updatedAt,
+      'createdAt': createdAt.toIso8601String(), // Store as ISO string
+      'updatedAt': updatedAt.toIso8601String(), // Store as ISO string
     };
   }
 
@@ -187,10 +272,10 @@ class RoutePoint {
 
   factory RoutePoint.fromJson(Map<String, dynamic> json) {
     return RoutePoint(
-      nodeId: json['nodeId'] as String,
+      nodeId: json['nodeId']?.toString() ?? '',
       location: GeoPoint.fromJson(json['location'] as Map<String, dynamic>),
-      address: json['address'] as String,
-      label: json['label'] as String?,
+      address: json['address']?.toString() ?? '',
+      label: json['label']?.toString(),
     );
   }
 
@@ -217,57 +302,54 @@ class RouteSegment {
     required this.polyline,
   });
 
- // In the RouteSegment class in route_model.dart:
-
-factory RouteSegment.fromJson(Map<String, dynamic> json) {
-  // Safely process polyline data
-  List<GeoPoint> polylinePoints = [];
-  if (json.containsKey('polyline') && json['polyline'] != null) {
-    try {
-      final polylineData = json['polyline'] as List<dynamic>;
-      polylinePoints = polylineData.map((point) {
-        if (point is Map<String, dynamic>) {
-          try {
-            return GeoPoint.fromJson(point);
-          } catch (e) {
-            print('Error creating GeoPoint from: $point');
+  factory RouteSegment.fromJson(Map<String, dynamic> json) {
+    // Safely process polyline data
+    List<GeoPoint> polylinePoints = [];
+    if (json.containsKey('polyline') && json['polyline'] != null) {
+      try {
+        final polylineData = json['polyline'] as List<dynamic>;
+        polylinePoints = polylineData.map((point) {
+          if (point is Map<String, dynamic>) {
+            try {
+              return GeoPoint.fromJson(point);
+            } catch (e) {
+              print('Error creating GeoPoint from: $point');
+              return GeoPoint(latitude: 0, longitude: 0);
+            }
+          } else {
+            print('Polyline point is not a Map: $point');
             return GeoPoint(latitude: 0, longitude: 0);
           }
-        } else {
-          print('Polyline point is not a Map: $point');
-          return GeoPoint(latitude: 0, longitude: 0);
-        }
-      }).toList();
-    } catch (e) {
-      print('Error processing polyline data: $e');
-      // Provide an empty list as fallback
-      polylinePoints = [];
+        }).toList();
+      } catch (e) {
+        print('Error processing polyline data: $e');
+        polylinePoints = [];
+      }
     }
-  }
 
-  return RouteSegment(
-    from: json.containsKey('from') && json['from'] != null
-        ? RoutePoint.fromJson(json['from'] as Map<String, dynamic>)
-        : RoutePoint(
-            nodeId: '',
-            location: GeoPoint(latitude: 0, longitude: 0),
-            address: '',
-          ),
-    to: json.containsKey('to') && json['to'] != null
-        ? RoutePoint.fromJson(json['to'] as Map<String, dynamic>)
-        : RoutePoint(
-            nodeId: '',
-            location: GeoPoint(latitude: 0, longitude: 0),
-            address: '',
-          ),
-    distance: json.containsKey('distance') && json['distance'] != null
-        ? (json['distance'] is double 
-            ? json['distance'] as double
-            : (json['distance'] as num).toDouble())
-        : 0.0,
-    polyline: polylinePoints,
-  );
-}
+    return RouteSegment(
+      from: json.containsKey('from') && json['from'] != null
+          ? RoutePoint.fromJson(json['from'] as Map<String, dynamic>)
+          : RoutePoint(
+              nodeId: '',
+              location: GeoPoint(latitude: 0, longitude: 0),
+              address: '',
+            ),
+      to: json.containsKey('to') && json['to'] != null
+          ? RoutePoint.fromJson(json['to'] as Map<String, dynamic>)
+          : RoutePoint(
+              nodeId: '',
+              location: GeoPoint(latitude: 0, longitude: 0),
+              address: '',
+            ),
+      distance: json.containsKey('distance') && json['distance'] != null
+          ? (json['distance'] is double 
+              ? json['distance'] as double
+              : (json['distance'] as num).toDouble())
+          : 0.0,
+      polyline: polylinePoints,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {

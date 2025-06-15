@@ -1,8 +1,9 @@
-// lib/screens/simplified/simple_admin_screen.dart - REDESIGNED WITH LARGE MAP
+// lib/screens/simplified/simple_admin_screen.dart - WITH USER REPORTS
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
 import '../../models/report_model.dart';
+import '../../services/database_service.dart'; // NEW: For loading reports
 import '../../services/location_service.dart';
 import '../../services/api_service.dart';
 import '../../screens/simplified/role_selection_screen.dart';
@@ -26,15 +27,18 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   
   bool _isLoading = false;
   bool _isLoadingRoutes = false;
+  bool _isLoadingReports = false; // NEW: Loading state for reports
   bool _backendConnected = false;
   
   GeoPoint? _currentLocation;
   List<Map<String, dynamic>> _allRoutes = [];
+  List<ReportModel> _userReports = []; // NEW: User reports list
   Map<String, dynamic>? _csvDataInfo;
   String? _errorMessage;
   
   late LocationService _locationService;
   late ApiService _apiService;
+  late DatabaseService _databaseService; // NEW: Database service
   
   // UI state
   bool _showInfoPanel = true;
@@ -46,7 +50,6 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   void initState() {
     super.initState();
     
-    // Initialize animation controllers
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 600),
       vsync: this,
@@ -57,7 +60,6 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
       vsync: this,
     );
     
-    // Initialize animations after controllers are ready
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -76,8 +78,8 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     
     _locationService = Provider.of<LocationService>(context, listen: false);
     _apiService = Provider.of<ApiService>(context, listen: false);
+    _databaseService = Provider.of<DatabaseService>(context, listen: false); // NEW
     
-    // Start animations and initialization
     _initializeAdminDashboard();
     _animationController?.forward();
   }
@@ -148,6 +150,10 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
       print('4️⃣ Generating route network...');
       await _loadRouteNetwork();
       
+      // Step 5: Load user reports (NEW)
+      print('5️⃣ Loading user reports...');
+      await _loadUserReports();
+      
       print('✅ === ADMIN DASHBOARD READY ===\n');
       
     } catch (e) {
@@ -198,12 +204,10 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
       setState(() {
         _allRoutes = routes.cast<Map<String, dynamic>>();
         _isLoadingRoutes = false;
-        _isLoading = false;
       });
       
       print('✅ Loaded ${routes.length} route networks');
       
-      // Show info panel after routes are loaded
       if (_allRoutes.isNotEmpty) {
         _panelController?.forward();
       }
@@ -213,8 +217,42 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
       setState(() {
         _errorMessage = 'Cannot load route network: $e';
         _isLoadingRoutes = false;
+      });
+    }
+  }
+  
+  // NEW: Load user reports from local database
+  Future<void> _loadUserReports() async {
+    setState(() {
+      _isLoadingReports = true;
+    });
+    
+    try {
+      print('📋 Loading user reports from local database...');
+      
+      // Load all reports (both resolved and unresolved)
+      final unresolved = await _databaseService.getUnresolvedReportsList();
+      final resolved = await _databaseService.getResolvedReportsList();
+      
+      final allReports = [...unresolved, ...resolved];
+      
+      setState(() {
+        _userReports = allReports;
+        _isLoadingReports = false;
+        _isLoading = false; // Main loading complete
+      });
+      
+      print('✅ Loaded ${allReports.length} user reports');
+      print('   - Unresolved: ${unresolved.length}');
+      print('   - Resolved: ${resolved.length}');
+      
+    } catch (e) {
+      print('❌ Failed to load user reports: $e');
+      setState(() {
+        _isLoadingReports = false;
         _isLoading = false;
       });
+      // Don't throw error for reports - dashboard can work without them
     }
   }
   
@@ -230,22 +268,22 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
         opacity: _fadeAnimation!,
         child: Stack(
           children: [
-            // MAIN MAP - Full screen background
-            _buildFullScreenMap(),
+            // MAIN MAP - Full screen background (UPDATED with reports)
+            _buildFullScreenMapWithReports(),
             
-            // TOP STATUS BAR
-            _buildTopStatusBar(),
+            // TOP STATUS BAR (UPDATED)
+            _buildUpdatedTopStatusBar(),
             
             // FLOATING ACTION BUTTON - Create Report
             _buildCreateReportFAB(),
             
-            // INFO PANEL - Bottom overlay
-            if (_showInfoPanel && _allRoutes.isNotEmpty)
-              _buildInfoPanel(),
+            // INFO PANEL - Bottom overlay (UPDATED)
+            if (_showInfoPanel && (_allRoutes.isNotEmpty || _userReports.isNotEmpty))
+              _buildUpdatedInfoPanel(),
             
-            // SYSTEM STATS PANEL - Top right overlay
+            // SYSTEM STATS PANEL - Top right overlay (UPDATED)
             if (_showSystemStats)
-              _buildSystemStatsPanel(),
+              _buildUpdatedSystemStatsPanel(),
             
             // CREATE REPORT PANEL - Right side overlay
             if (_showCreateReportPanel)
@@ -258,41 +296,13 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
             if (_errorMessage != null && !_isLoading) _buildErrorOverlay(),
           ],
         ),
-      ) : Stack(
-        children: [
-          // MAIN MAP - Full screen background
-          _buildFullScreenMap(),
-          
-          // TOP STATUS BAR
-          _buildTopStatusBar(),
-          
-          // FLOATING ACTION BUTTON - Create Report
-          _buildCreateReportFAB(),
-          
-          // INFO PANEL - Bottom overlay
-          if (_showInfoPanel && _allRoutes.isNotEmpty)
-            _buildInfoPanel(),
-          
-          // SYSTEM STATS PANEL - Top right overlay
-          if (_showSystemStats)
-            _buildSystemStatsPanel(),
-          
-          // CREATE REPORT PANEL - Right side overlay
-          if (_showCreateReportPanel)
-            _buildCreateReportPanel(),
-          
-          // LOADING OVERLAY
-          if (_isLoading) _buildLoadingOverlay(),
-          
-          // ERROR OVERLAY
-          if (_errorMessage != null && !_isLoading) _buildErrorOverlay(),
-        ],
-      ),
+      ) : Container(),
     );
   }
   
-  Widget _buildFullScreenMap() {
-    if (_currentLocation == null || _allRoutes.isEmpty) {
+  // NEW: Full screen map with reports
+  Widget _buildFullScreenMapWithReports() {
+    if (_currentLocation == null) {
       return Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -331,28 +341,30 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     return OpenStreetMapWidget(
       currentLocation: _currentLocation!,
       polylineRoutes: _allRoutes,
-      isLoading: _isLoadingRoutes,
+      userReports: _userReports, // NEW: Pass user reports
+      isLoading: _isLoadingRoutes || _isLoadingReports,
     );
   }
   
-  Widget _buildTopStatusBar() {
+  // UPDATED: Top status bar with reports info
+  Widget _buildUpdatedTopStatusBar() {
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
       child: Container(
         padding: EdgeInsets.only(
-          top: MediaQuery.of(context).padding.top + 4,  // Reduced padding
-          left: 12,  // Reduced from 16
-          right: 12, // Reduced from 16
-          bottom: 4, // Reduced from 8
+          top: MediaQuery.of(context).padding.top + 4,
+          left: 12,
+          right: 12,
+          bottom: 4,
         ),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Colors.black.withOpacity(0.6),  // Reduced opacity
+              Colors.black.withOpacity(0.6),
               Colors.transparent,
             ],
           ),
@@ -361,18 +373,18 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
           bottom: false,
           child: Row(
             children: [
-              // ADMIN BADGE - Made smaller
+              // ADMIN BADGE
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), // Reduced
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Colors.orange, Colors.orange.shade600],
                   ),
-                  borderRadius: BorderRadius.circular(16), // Reduced from 20
+                  borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.orange.withOpacity(0.3),
-                      blurRadius: 6, // Reduced from 8
+                      blurRadius: 6,
                       offset: Offset(0, 2),
                     ),
                   ],
@@ -380,13 +392,13 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.admin_panel_settings, color: Colors.white, size: 14), // Reduced
-                    SizedBox(width: 4), // Reduced
+                    Icon(Icons.admin_panel_settings, color: Colors.white, size: 14),
+                    SizedBox(width: 4),
                     Text(
                       'ADMIN',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 10, // Reduced
+                        fontSize: 10,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -394,32 +406,32 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                 ),
               ),
               
-              const SizedBox(width: 8), // Reduced from 12
+              const SizedBox(width: 8),
               
-              // CONNECTION STATUS - Made smaller
+              // CONNECTION STATUS
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), // Reduced
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
                   color: _backendConnected ? Colors.green : Colors.red,
-                  borderRadius: BorderRadius.circular(10), // Reduced from 12
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 4, // Reduced
-                      height: 4, // Reduced
+                      width: 4,
+                      height: 4,
                       decoration: BoxDecoration(
                         color: Colors.white,
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 4), // Reduced
+                    const SizedBox(width: 4),
                     Text(
                       _backendConnected ? 'Online' : 'Offline',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 9, // Reduced
+                        fontSize: 9,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -427,9 +439,36 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                 ),
               ),
               
+              const SizedBox(width: 8),
+              
+              // NEW: Reports indicator
+              if (_userReports.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.blue,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.report_problem, color: Colors.white, size: 10),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${_userReports.length}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              
               const Spacer(),
               
-              // ACTION BUTTONS - Made smaller
+              // ACTION BUTTONS
               Row(
                 children: [
                   _buildTopActionButton(
@@ -442,14 +481,14 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                     isActive: _showSystemStats,
                   ),
                   
-                  const SizedBox(width: 6), // Reduced
+                  const SizedBox(width: 6),
                   
                   _buildTopActionButton(
                     icon: Icons.refresh,
                     onPressed: _refreshDashboard,
                   ),
                   
-                  const SizedBox(width: 6), // Reduced
+                  const SizedBox(width: 6),
                   
                   _buildTopActionButton(
                     icon: Icons.more_vert,
@@ -470,17 +509,17 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     bool isActive = false,
   }) {
     return Material(
-      color: isActive ? Colors.white.withOpacity(0.2) : Colors.black.withOpacity(0.2), // Reduced opacity
-      borderRadius: BorderRadius.circular(6), // Reduced from 8
+      color: isActive ? Colors.white.withOpacity(0.2) : Colors.black.withOpacity(0.2),
+      borderRadius: BorderRadius.circular(6),
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: const EdgeInsets.all(6), // Reduced from 8
+          padding: const EdgeInsets.all(6),
           child: Icon(
             icon,
             color: Colors.white,
-            size: 18, // Reduced from 20
+            size: 18,
           ),
         ),
       ),
@@ -488,10 +527,9 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   }
   
   Widget _buildCreateReportFAB() {
-    // Calculate bottom position based on panel state
     double bottomPosition = 16;
-    if (_showInfoPanel && _allRoutes.isNotEmpty) {
-      bottomPosition = _isInfoPanelExpanded ? 280 : 140; // Adjust based on panel height
+    if (_showInfoPanel && (_allRoutes.isNotEmpty || _userReports.isNotEmpty)) {
+      bottomPosition = _isInfoPanelExpanded ? 280 : 140;
     }
     
     return Positioned(
@@ -500,7 +538,6 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // INFO TOGGLE FAB - Made smaller
           FloatingActionButton(
             mini: true,
             heroTag: "info_toggle",
@@ -516,14 +553,13 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                 _panelController?.reverse();
               }
             },
-            child: Icon(_showInfoPanel ? Icons.info : Icons.info_outline, size: 18), // Smaller icon
+            child: Icon(_showInfoPanel ? Icons.info : Icons.info_outline, size: 18),
           ),
           
-          const SizedBox(height: 8), // Reduced spacing
+          const SizedBox(height: 8),
           
-          // MAIN CREATE REPORT FAB - Compact design
           Container(
-            height: 48, // Fixed height for consistency
+            height: 48,
             child: FloatingActionButton.extended(
               heroTag: "create_report",
               onPressed: _backendConnected ? () {
@@ -533,12 +569,12 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
               } : null,
               backgroundColor: _backendConnected ? Colors.orange : Colors.grey,
               foregroundColor: Colors.white,
-              icon: Icon(Icons.add_circle, size: 20), // Smaller icon
+              icon: Icon(Icons.add_circle, size: 20),
               label: Text(
                 'Report',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 14, // Smaller text
+                  fontSize: 14,
                 ),
               ),
             ),
@@ -548,7 +584,8 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     );
   }
   
-  Widget _buildInfoPanel() {
+  // UPDATED: Info panel with reports info
+  Widget _buildUpdatedInfoPanel() {
     return Positioned(
       bottom: 0,
       left: 0,
@@ -561,28 +598,28 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
             child: child,
           );
         },
-        child: _buildInfoPanelContent(),
-      ) : _buildInfoPanelContent(),
+        child: _buildUpdatedInfoPanelContent(),
+      ) : Container(),
     );
   }
   
-  Widget _buildInfoPanelContent() {
+  Widget _buildUpdatedInfoPanelContent() {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)), // Reduced radius
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.15), // Reduced shadow
-            blurRadius: 15, // Reduced blur
-            offset: Offset(0, -3), // Reduced offset
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 15,
+            offset: Offset(0, -3),
           ),
         ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // COMPACT PANEL HEADER
+          // UPDATED PANEL HEADER
           GestureDetector(
             onTap: () {
               setState(() {
@@ -590,49 +627,47 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
               });
             },
             child: Container(
-              padding: const EdgeInsets.all(12), // Reduced padding
+              padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  // DRAG HANDLE
                   Container(
-                    width: 30, // Smaller handle
-                    height: 3, // Thinner handle
+                    width: 30,
+                    height: 3,
                     decoration: BoxDecoration(
                       color: Colors.grey.shade300,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                   
-                  const SizedBox(height: 8), // Reduced spacing
+                  const SizedBox(height: 8),
                   
-                  // COMPACT HEADER INFO
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(6), // Smaller padding
+                        padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
                           color: Colors.orange,
-                          borderRadius: BorderRadius.circular(6), // Smaller radius
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Icon(Icons.water_drop, color: Colors.white, size: 16), // Smaller icon
+                        child: Icon(Icons.dashboard, color: Colors.white, size: 16),
                       ),
-                      const SizedBox(width: 8), // Reduced spacing
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Water Supply Network',
+                              'Admin Dashboard',
                               style: TextStyle(
-                                fontSize: 14, // Smaller text
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             Text(
-                              '${_allRoutes.length} routes • Real-time data',
+                              '${_allRoutes.length} supplies • ${_userReports.length} reports',
                               style: TextStyle(
                                 color: Colors.grey.shade600,
-                                fontSize: 11, // Smaller text
+                                fontSize: 11,
                               ),
                             ),
                           ],
@@ -641,7 +676,7 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                       Icon(
                         _isInfoPanelExpanded ? Icons.expand_less : Icons.expand_more,
                         color: Colors.grey.shade600,
-                        size: 18, // Smaller icon
+                        size: 18,
                       ),
                     ],
                   ),
@@ -650,35 +685,39 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
             ),
           ),
           
-          // COMPACT EXPANDABLE CONTENT
-          if (_isInfoPanelExpanded) _buildCompactExpandedContent(),
+          if (_isInfoPanelExpanded) _buildUpdatedExpandedContent(),
         ],
       ),
     );
   }
   
-  Widget _buildCompactExpandedContent() {
+  Widget _buildUpdatedExpandedContent() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), // Reduced padding
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Column(
         children: [
-          Container(height: 1, color: Colors.grey.shade300), // Thinner divider
-          const SizedBox(height: 12), // Reduced spacing
+          Container(height: 1, color: Colors.grey.shade300),
+          const SizedBox(height: 12),
           
-          // COMPACT QUICK STATS ROW
+          // UPDATED QUICK STATS ROW
           Row(
             children: [
-              Expanded(child: _buildCompactStat('Data Points', '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? 0}', Colors.blue)),
-              Expanded(child: _buildCompactStat('Routes', '${_allRoutes.length}', Colors.green)),
-              Expanded(child: _buildCompactStat('Coverage', 'All Areas', Colors.purple)),
+              Expanded(child: _buildCompactStat('Supplies', '${_allRoutes.length}', Colors.blue)),
+              Expanded(child: _buildCompactStat('Reports', '${_userReports.length}', Colors.orange)),
+              Expanded(child: _buildCompactStat('Unresolved', '${_userReports.where((r) => !r.isResolved).length}', Colors.red)),
               Expanded(child: _buildCompactStat('Status', _backendConnected ? 'Online' : 'Offline', _backendConnected ? Colors.green : Colors.red)),
             ],
           ),
           
-          const SizedBox(height: 12), // Reduced spacing
+          const SizedBox(height: 12),
           
-          // COMPACT SHORTEST ROUTE INFO
           if (_allRoutes.isNotEmpty) _buildCompactShortestRouteInfo(),
+          
+          // NEW: Recent reports section
+          if (_userReports.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildRecentReportsInfo(),
+          ],
         ],
       ),
     );
@@ -690,16 +729,16 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
         Text(
           value,
           style: TextStyle(
-            fontSize: 14, // Smaller text
+            fontSize: 14,
             fontWeight: FontWeight.bold,
             color: color,
           ),
         ),
-        const SizedBox(height: 2), // Reduced spacing
+        const SizedBox(height: 2),
         Text(
           label,
           style: TextStyle(
-            fontSize: 9, // Smaller text
+            fontSize: 9,
             color: Colors.grey.shade600,
           ),
           textAlign: TextAlign.center,
@@ -712,18 +751,18 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     final shortestRoute = _allRoutes.first;
     
     return Container(
-      padding: const EdgeInsets.all(10), // Reduced padding
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [Colors.green.shade50, Colors.green.shade100.withOpacity(0.3)],
         ),
-        borderRadius: BorderRadius.circular(8), // Smaller radius
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.green.shade200),
       ),
       child: Row(
         children: [
-          Icon(Icons.star, color: Colors.green, size: 16), // Smaller icon
-          const SizedBox(width: 6), // Reduced spacing
+          Icon(Icons.star, color: Colors.green, size: 16),
+          const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,110 +772,16 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.green.shade800,
-                    fontSize: 12, // Smaller text
-                  ),
-                ),
-                Text(
-                  '${shortestRoute['distance']?.toStringAsFixed(1) ?? '?'} km • ${shortestRoute['travel_time'] ?? '?'}',
-                  style: TextStyle(
-                    color: Colors.green.shade600,
-                    fontSize: 10, // Smaller text
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildExpandedPanelContent() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        children: [
-          const Divider(height: 1),
-          const SizedBox(height: 16),
-          
-          // QUICK STATS ROW
-          Row(
-            children: [
-              Expanded(child: _buildQuickStat('Data Points', '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? 0}', Colors.blue)),
-              Expanded(child: _buildQuickStat('Routes', '${_allRoutes.length}', Colors.green)),
-              Expanded(child: _buildQuickStat('Coverage', 'All Areas', Colors.purple)),
-              Expanded(child: _buildQuickStat('Status', _backendConnected ? 'Online' : 'Offline', _backendConnected ? Colors.green : Colors.red)),
-            ],
-          ),
-          
-          const SizedBox(height: 16),
-          
-          // SHORTEST ROUTE INFO
-          if (_allRoutes.isNotEmpty) _buildShortestRouteInfo(),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildQuickStat(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            color: Colors.grey.shade600,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildShortestRouteInfo() {
-    final shortestRoute = _allRoutes.first;
-    
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.green.shade50, Colors.green.shade100.withOpacity(0.3)],
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.green.shade200),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.star, color: Colors.green, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Shortest Route',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green.shade800,
-                    fontSize: 14,
-                  ),
-                ),
-                Text(
-                  '${shortestRoute['distance']?.toStringAsFixed(1) ?? '?'} km • ${shortestRoute['travel_time'] ?? '?'}',
-                  style: TextStyle(
-                    color: Colors.green.shade600,
                     fontSize: 12,
                   ),
                 ),
+                Text(
+                  '${shortestRoute['distance']?.toStringAsFixed(1) ?? '?'} km • ${shortestRoute['travel_time'] ?? '?'}',
+                  style: TextStyle(
+                    color: Colors.green.shade600,
+                    fontSize: 10,
+                  ),
+                ),
               ],
             ),
           ),
@@ -845,21 +790,85 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
     );
   }
   
-  Widget _buildSystemStatsPanel() {
+  // NEW: Recent reports info
+  Widget _buildRecentReportsInfo() {
+    final recentReports = _userReports.take(3).toList();
+    
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.orange.shade50, Colors.orange.shade100.withOpacity(0.3)],
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.report_problem, color: Colors.orange, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                'Recent Reports',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange.shade800,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...recentReports.map((report) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: report.isResolved ? Colors.green : Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    report.title,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.orange.shade700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          )).toList(),
+        ],
+      ),
+    );
+  }
+  
+  // UPDATED: System stats panel with reports
+  Widget _buildUpdatedSystemStatsPanel() {
     return Positioned(
-      top: MediaQuery.of(context).padding.top + 60, // Avoid top status bar
+      top: MediaQuery.of(context).padding.top + 60,
       right: 12,
       child: Container(
-        width: 200, // Reduced width
-        padding: const EdgeInsets.all(12), // Reduced padding
+        width: 200,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95), // Slightly transparent
+          color: Colors.white.withOpacity(0.95),
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.15), // Reduced shadow
-              blurRadius: 8, // Reduced blur
-              offset: Offset(0, 3), // Reduced offset
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 8,
+              offset: Offset(0, 3),
             ),
           ],
         ),
@@ -868,32 +877,34 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
           children: [
             Row(
               children: [
-                Icon(Icons.analytics, color: Colors.orange, size: 16), // Smaller icon
-                const SizedBox(width: 6), // Reduced spacing
+                Icon(Icons.analytics, color: Colors.orange, size: 16),
+                const SizedBox(width: 6),
                 Text(
                   'System Stats',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 14, // Smaller text
+                    fontSize: 14,
                   ),
                 ),
                 const Spacer(),
                 GestureDetector(
                   onTap: () => setState(() => _showSystemStats = false),
-                  child: Icon(Icons.close, size: 14, color: Colors.grey), // Smaller close button
+                  child: Icon(Icons.close, size: 14, color: Colors.grey),
                 ),
               ],
             ),
             
-            const SizedBox(height: 8), // Reduced spacing
-            Container(height: 1, color: Colors.grey.shade300), // Thinner divider
+            const SizedBox(height: 8),
+            Container(height: 1, color: Colors.grey.shade300),
             const SizedBox(height: 8),
             
             _buildStatRow('Backend', _backendConnected ? 'Connected' : 'Offline', _backendConnected ? Colors.green : Colors.red),
             _buildStatRow('Location', _currentLocation != null ? 'Active' : 'Inactive', _currentLocation != null ? Colors.green : Colors.orange),
             _buildStatRow('Routes', '${_allRoutes.length}', Colors.blue),
             _buildStatRow('Data Points', '${(_csvDataInfo?['points'] as List<dynamic>?)?.length ?? 0}', Colors.purple),
-            _buildStatRow('Status', _isLoadingRoutes ? 'Loading...' : 'Ready', _isLoadingRoutes ? Colors.orange : Colors.green),
+            _buildStatRow('Total Reports', '${_userReports.length}', Colors.orange),
+            _buildStatRow('Unresolved', '${_userReports.where((r) => !r.isResolved).length}', Colors.red),
+            _buildStatRow('Status', _isLoadingRoutes || _isLoadingReports ? 'Loading...' : 'Ready', _isLoadingRoutes || _isLoadingReports ? Colors.orange : Colors.green),
           ],
         ),
       ),
@@ -902,21 +913,21 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   
   Widget _buildStatRow(String label, String value, Color valueColor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2), // Reduced padding
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             label,
             style: TextStyle(
-              fontSize: 11, // Smaller text
+              fontSize: 11,
               color: Colors.grey.shade700,
             ),
           ),
           Text(
             value,
             style: TextStyle(
-              fontSize: 11, // Smaller text
+              fontSize: 11,
               fontWeight: FontWeight.bold,
               color: valueColor,
             ),
@@ -928,11 +939,11 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
   
   Widget _buildCreateReportPanel() {
     return Positioned(
-      top: MediaQuery.of(context).padding.top + 60, // Avoid top status bar
-      bottom: _showInfoPanel ? 160 : 80, // Avoid bottom elements
+      top: MediaQuery.of(context).padding.top + 60,
+      bottom: _showInfoPanel ? 160 : 80,
       right: 12,
       child: Container(
-        width: 260, // Reduced width
+        width: 260,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -943,100 +954,98 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
               Colors.orange.shade100.withOpacity(0.3),
             ],
           ),
-          borderRadius: BorderRadius.circular(12), // Reduced radius
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.15), // Reduced shadow
-              blurRadius: 10, // Reduced blur
-              offset: Offset(0, 3), // Reduced offset
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 10,
+              offset: Offset(0, 3),
             ),
           ],
         ),
         child: Column(
           children: [
-            // COMPACT HEADER
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(6), // Reduced padding
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [Colors.orange, Colors.orange.shade600],
                     ),
-                    borderRadius: BorderRadius.circular(6), // Reduced radius
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 16), // Smaller icon
+                  child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 16),
                 ),
-                const SizedBox(width: 8), // Reduced spacing
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Admin Report',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 14, // Smaller text
+                      fontSize: 14,
                     ),
                   ),
                 ),
                 GestureDetector(
                   onTap: () => setState(() => _showCreateReportPanel = false),
-                  child: Icon(Icons.close, size: 14, color: Colors.grey), // Smaller close
+                  child: Icon(Icons.close, size: 14, color: Colors.grey),
                 ),
               ],
             ),
             
             const SizedBox(height: 16),
             
-            // COMPACT CONTENT
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
-                    width: 60, // Smaller icon container
+                    width: 60,
                     height: 60,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [Colors.orange, Colors.orange.shade600],
                       ),
-                      borderRadius: BorderRadius.circular(15), // Reduced radius
+                      borderRadius: BorderRadius.circular(15),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.orange.withOpacity(0.3),
-                          blurRadius: 10, // Reduced blur
-                          offset: Offset(0, 3), // Reduced offset
+                          blurRadius: 10,
+                          offset: Offset(0, 3),
                         ),
                       ],
                     ),
                     child: Icon(
                       Icons.add_circle,
-                      size: 30, // Smaller icon
+                      size: 30,
                       color: Colors.white,
                     ),
                   ),
                   
-                  const SizedBox(height: 12), // Reduced spacing
+                  const SizedBox(height: 12),
                   
                   Text(
                     'Create Admin Report',
                     style: TextStyle(
-                      fontSize: 16, // Smaller title
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   
-                  const SizedBox(height: 8), // Reduced spacing
+                  const SizedBox(height: 8),
                   
                   Text(
                     'Enhanced AI analysis with admin-level data access.',
                     style: TextStyle(
                       color: Colors.grey.shade700,
-                      fontSize: 12, // Smaller description
+                      fontSize: 12,
                       height: 1.3,
                     ),
                     textAlign: TextAlign.center,
                   ),
                   
-                  const SizedBox(height: 16), // Reduced spacing
+                  const SizedBox(height: 16),
                   
                   SizedBox(
                     width: double.infinity,
@@ -1048,22 +1057,25 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
                           MaterialPageRoute(
                             builder: (context) => SimpleReportScreen(isAdmin: true),
                           ),
-                        );
+                        ).then((_) {
+                          // Refresh reports when returning from report screen
+                          _loadUserReports();
+                        });
                       } : null,
-                      icon: Icon(Icons.admin_panel_settings, size: 16), // Smaller icon
+                      icon: Icon(Icons.admin_panel_settings, size: 16),
                       label: Text(
                         'Start Creating',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 12, // Smaller text
+                          fontSize: 12,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _backendConnected ? Colors.orange : Colors.grey,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 8), // Reduced padding
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8), // Reduced radius
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                     ),
@@ -1100,7 +1112,9 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
               WaterDropLoader(message: 'Initializing Admin Dashboard...'),
               const SizedBox(height: 16),
               Text(
-                'Loading water supply network and route data',
+                _isLoadingReports 
+                    ? 'Loading user reports and network data...'
+                    : 'Loading water supply network and route data...',
                 style: TextStyle(
                   color: Colors.grey.shade600,
                   fontSize: 14,
@@ -1230,6 +1244,7 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
             ListTile(
               leading: Icon(Icons.refresh, color: Colors.orange),
               title: Text('Refresh Dashboard'),
+              subtitle: Text('Reload routes and reports'),
               onTap: () {
                 Navigator.pop(context);
                 _refreshDashboard();
@@ -1238,9 +1253,20 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
             ListTile(
               leading: Icon(Icons.analytics, color: Colors.blue),
               title: Text('System Statistics'),
+              subtitle: Text('View detailed system info'),
               onTap: () {
                 Navigator.pop(context);
                 setState(() => _showSystemStats = !_showSystemStats);
+              },
+            ),
+            // NEW: View reports option
+            ListTile(
+              leading: Icon(Icons.report_problem, color: Colors.purple),
+              title: Text('View All Reports'),
+              subtitle: Text('${_userReports.length} total reports'),
+              onTap: () {
+                Navigator.pop(context);
+                _showReportsDialog();
               },
             ),
             ListTile(
@@ -1253,6 +1279,105 @@ class _SimpleAdminScreenState extends State<SimpleAdminScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+  
+  // NEW: Show reports dialog
+  void _showReportsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.report_problem, color: Colors.orange),
+            const SizedBox(width: 8),
+            Text('User Reports'),
+          ],
+        ),
+        content: Container(
+          width: double.maxFinite,
+          height: 300,
+          child: _userReports.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.inbox, size: 60, color: Colors.grey.shade400),
+                      SizedBox(height: 16),
+                      Text('No reports found'),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: _userReports.length,
+                  itemBuilder: (context, index) {
+                    final report = _userReports[index];
+                    return Card(
+                      margin: EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: report.isResolved ? Colors.green : Colors.red,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            report.isResolved ? Icons.check : Icons.warning,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                        title: Text(
+                          report.title,
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'By: ${report.userName}',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            Text(
+                              report.description,
+                              style: TextStyle(fontSize: 11),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                        trailing: Text(
+                          report.isResolved ? 'Resolved' : 'Open',
+                          style: TextStyle(
+                            color: report.isResolved ? Colors.green : Colors.red,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+          if (_userReports.isNotEmpty)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _loadUserReports(); // Refresh reports
+              },
+              child: Text('Refresh'),
+            ),
+        ],
       ),
     );
   }
