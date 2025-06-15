@@ -655,6 +655,11 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = json.decode(responseBody);
         
+          print('🔬 Full backend response: $data');
+  print('🔬 Backend success: ${data['success']}');
+  print('🔬 Backend water_quality_class: ${data['water_quality_class']}');
+  print('🔬 Backend confidence: ${data['confidence']}');
+  
         WaterQualityState qualityState = WaterQualityState.unknown;
         double confidenceScore = 0.0;
         String originalClass = "UNKNOWN";

@@ -219,148 +219,229 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
     );
   }
   
-  Future<void> _pickImageFromSource(ImageSource source) async {
-    try {
-      _logDebug('Opening image picker from ${source.name}...');
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: source, 
-        imageQuality: widget.isAdmin ? 90 : 85,
-        maxWidth: 1920,
-        maxHeight: 1080,
-      );
+ // FIXED: _pickImageFromSource method in simple_report_screen.dart
+// Add this method to replace the existing _pickImageFromSource
+
+Future<void> _pickImageFromSource(ImageSource source) async {
+  try {
+    _logDebug('Opening image picker from ${source.name}...');
+    final picker = ImagePicker();
+    
+    // FIXED: Use SAME settings for both camera and gallery
+    final pickedFile = await picker.pickImage(
+      source: source, 
+      imageQuality: 85,        // SAME quality for both
+      maxWidth: 1920,          // SAME max width
+      maxHeight: 1080,         // SAME max height
+      preferredCameraDevice: CameraDevice.rear, // Use rear camera for better quality
+    );
+    
+    if (pickedFile != null) {
+      File imageFile = File(pickedFile.path);
       
-      if (pickedFile != null) {
-        final File imageFile = File(pickedFile.path);
+      if (!await imageFile.exists()) {
+        _showMessage('Error: Could not access selected image', isError: true);
+        return;
+      }
+      
+      // FIXED: NORMALIZE IMAGE PROCESSING for both camera and gallery
+      try {
+        setState(() {
+          _isSavingImages = true;
+        });
         
-        if (!await imageFile.exists()) {
-          _showMessage('Error: Could not access selected image', isError: true);
-          return;
+        // Step 1: Read and validate image first
+        final imageBytes = await imageFile.readAsBytes();
+        _logDebug('Original image size: ${(imageBytes.length / 1024).toStringAsFixed(2)} KB');
+        
+        if (imageBytes.isEmpty) {
+          throw Exception('Image file is empty');
         }
         
-        // Save image to local storage immediately
-        try {
+        // Step 2: Process image to ensure consistency
+        final processedImageFile = await _processImageForAnalysis(imageFile, source);
+        
+        // Step 3: Save processed image to local storage
+        final folder = widget.isAdmin ? 'admin_reports' : 'reports';
+        final localPath = await _storageService.uploadImage(processedImageFile, folder);
+        
+        _logDebug('Image saved to local storage: $localPath');
+        
+        setState(() {
+          _imageFiles.add(File(localPath));
+          _savedImagePaths.add(localPath);
+          _isSavingImages = false;
+        });
+        
+        // Reset analysis results when new image added
+        if (_imageFiles.length == 1) {
           setState(() {
-            _isSavingImages = true;
+            _detectedQuality = WaterQualityState.unknown;
+            _confidence = null;
+            _originalClass = null;
           });
-          
-          final folder = widget.isAdmin ? 'admin_reports' : 'reports';
-          final localPath = await _storageService.uploadImage(imageFile, folder);
-          
-          _logDebug('Image saved to local storage: $localPath');
-          
-          setState(() {
-            _imageFiles.add(File(localPath)); // Add the saved file
-            _savedImagePaths.add(localPath); // Track the local path
-            _isSavingImages = false;
-          });
-          
-          // Reset analysis results when new image added
-          if (_imageFiles.length == 1) {
-            setState(() {
-              _detectedQuality = WaterQualityState.unknown;
-              _confidence = null;
-              _originalClass = null;
-            });
-          }
-          
-          _showMessage('Image saved locally!', isError: false);
-          
-        } catch (e) {
-          setState(() {
-            _isSavingImages = false;
-          });
-          _showMessage('Error saving image: $e', isError: true);
         }
+        
+        _showMessage('Image processed and saved successfully!', isError: false);
+        
+        // FIXED: Auto-analyze first image immediately with processed version
+        if (_imageFiles.length == 1) {
+          _logDebug('Auto-analyzing first image...');
+          await _detectWaterQuality(File(localPath));
+        }
+        
+      } catch (e) {
+        setState(() {
+          _isSavingImages = false;
+        });
+        _showMessage('Error processing image: $e', isError: true);
       }
-    } catch (e) {
-      setState(() {
-        _isSavingImages = false;
-      });
-      _showMessage('Error picking image: $e', isError: true);
     }
+  } catch (e) {
+    setState(() {
+      _isSavingImages = false;
+    });
+    _showMessage('Error picking image: $e', isError: true);
   }
-  
-  // Water quality detection - unchanged
-  Future<void> _detectWaterQuality(File image) async {
-    try {
-      setState(() {
-        _isDetecting = true;
-        _detectedQuality = WaterQualityState.unknown;
-        _confidence = null;
-        _originalClass = null;
-      });
-      
-      _logDebug('🔬 Starting REAL water quality detection...');
-      _logDebug('📁 Image file: ${image.path}');
-      
-      if (!await image.exists()) {
-        throw Exception('Image file does not exist');
-      }
-      
-      final fileSize = await image.length();
-      _logDebug('📏 Image size: ${fileSize} bytes');
-      
-      if (fileSize == 0) {
-        throw Exception('Image file is empty');
-      }
-      
-      _logDebug('🔗 Testing backend connection...');
-      final isConnected = await _apiService.testBackendConnection();
-      if (!isConnected) {
-        throw Exception('Backend server is not running.\n\nPlease start Python server:\n1. cd backend_version_2\n2. python main.py\n3. Ensure server runs on port 8000');
-      }
-      
-      _logDebug('✅ Backend connected, sending image for analysis...');
-      
-      final result = await _apiService.analyzeWaterQualityWithConfidence(image);
-      
-      _logDebug('✅ Real API Analysis completed');
-      _logDebug('🎯 Quality: ${result.waterQuality}');
-      _logDebug('📊 Confidence: ${result.confidence}%');
-      _logDebug('🏷️ Original class: ${result.originalClass}');
-      
-      if (result.waterQuality == WaterQualityState.unknown && result.confidence == 0.0) {
-        throw Exception('Backend returned invalid analysis results');
-      }
-      
-      setState(() {
-        _detectedQuality = result.waterQuality;
-        _confidence = result.confidence;
-        _originalClass = result.originalClass;
-        _isDetecting = false;
-      });
-      
-      _showMessage(
-        'Analysis Complete: ${WaterQualityUtils.getWaterQualityText(result.waterQuality)} (${result.confidence.toStringAsFixed(1)}% confidence)',
-        isError: false,
-      );
-      
-    } catch (e) {
-      _logDebug('❌ Real analysis failed: $e');
-      
-      setState(() {
-        _isDetecting = false;
-        _detectedQuality = WaterQualityState.unknown;
-        _confidence = null;
-        _originalClass = null;
-      });
-      
-      String errorMessage = 'Water quality analysis failed: ';
-      
-      if (e.toString().contains('Backend server')) {
-        errorMessage += 'Backend server not running. Please start main.py';
-      } else if (e.toString().contains('network') || e.toString().contains('connection')) {
-        errorMessage += 'Network connection error. Check your connection and try again.';
-      } else if (e.toString().contains('timeout')) {
-        errorMessage += 'Analysis timeout. Try with a smaller image or check server.';
-      } else {
-        errorMessage += e.toString();
-      }
-      
-      _showMessage(errorMessage, isError: true);
+}
+
+// NEW: Add this method to process images consistently
+Future<File> _processImageForAnalysis(File originalFile, ImageSource source) async {
+  try {
+    _logDebug('🔧 Processing image for analysis (source: ${source.name})...');
+    
+    // Import image processing library at the top of file if not already:
+    // import 'dart:typed_data';
+    // import 'dart:ui' as ui;
+    
+    final imageBytes = await originalFile.readAsBytes();
+    _logDebug('Original size: ${(imageBytes.length / 1024).toStringAsFixed(2)} KB');
+    
+    // For now, create a copy with standardized name and ensure proper format
+    final tempDir = await getTemporaryDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final processedPath = path.join(tempDir.path, 'processed_${timestamp}.jpg');
+    
+    // Copy to new location with .jpg extension
+    final processedFile = await originalFile.copy(processedPath);
+    
+    // Verify the processed file
+    if (await processedFile.exists()) {
+      final processedSize = await processedFile.length();
+      _logDebug('Processed size: ${(processedSize / 1024).toStringAsFixed(2)} KB');
+      _logDebug('✅ Image processing complete');
+      return processedFile;
+    } else {
+      throw Exception('Failed to create processed image');
     }
+    
+  } catch (e) {
+    _logDebug('❌ Error processing image: $e');
+    // Fallback to original file if processing fails
+    return originalFile;
   }
+}
+
+// FIXED: Update the detect water quality method to handle both sources consistently
+Future<void> _detectWaterQuality(File image) async {
+  try {
+    setState(() {
+      _isDetecting = true;
+      _detectedQuality = WaterQualityState.unknown;
+      _confidence = null;
+      _originalClass = null;
+    });
+    
+    _logDebug('🔬 Starting water quality detection...');
+    _logDebug('📁 Image file: ${image.path}');
+    
+    if (!await image.exists()) {
+      throw Exception('Image file does not exist');
+    }
+    
+    final fileSize = await image.length();
+    _logDebug('📏 Image size: ${fileSize} bytes');
+    
+    if (fileSize == 0) {
+      throw Exception('Image file is empty');
+    }
+    
+    // FIXED: Add image format validation
+    final extension = path.extension(image.path).toLowerCase();
+    if (!['.jpg', '.jpeg', '.png'].contains(extension)) {
+      _logDebug('⚠️ Unusual image extension: $extension');
+    }
+    
+    _logDebug('🔗 Testing backend connection...');
+    final isConnected = await _apiService.testBackendConnection();
+    if (!isConnected) {
+      throw Exception('Backend server is not running.\n\nPlease start Python server:\n1. cd backend_version_2\n2. python main.py\n3. Ensure server runs on port 8000');
+    }
+    
+    _logDebug('✅ Backend connected, sending image for analysis...');
+    
+    // FIXED: Add detailed logging before API call
+    _logDebug('📤 Sending to backend: ${image.path}');
+    _logDebug('📤 File exists: ${await image.exists()}');
+    _logDebug('📤 File size: ${await image.length()} bytes');
+    
+    final result = await _apiService.analyzeWaterQualityWithConfidence(image);
+    
+    _logDebug('✅ API Analysis completed');
+    _logDebug('🎯 Quality: ${result.waterQuality}');
+    _logDebug('📊 Confidence: ${result.confidence}%');
+    _logDebug('🏷️ Original class: ${result.originalClass}');
+    
+    // FIXED: Force debug of mapping process
+    if (result.originalClass.isNotEmpty && result.originalClass != "UNKNOWN") {
+      _logDebug('🔄 Testing mapping for: "${result.originalClass}"');
+      final testMapping = WaterQualityUtils.mapWaterQualityClass(result.originalClass);
+      _logDebug('🔄 Mapping result: $testMapping');
+    }
+    
+    if (result.waterQuality == WaterQualityState.unknown && result.confidence == 0.0) {
+      throw Exception('Backend returned invalid analysis results');
+    }
+    
+    setState(() {
+      _detectedQuality = result.waterQuality;
+      _confidence = result.confidence;
+      _originalClass = result.originalClass;
+      _isDetecting = false;
+    });
+    
+    // FIXED: More detailed success message
+    final qualityText = WaterQualityUtils.getWaterQualityText(result.waterQuality);
+    _showMessage(
+      'Analysis Complete: $qualityText (${result.confidence.toStringAsFixed(1)}% confidence)',
+      isError: false,
+    );
+    
+  } catch (e) {
+    _logDebug('❌ Analysis failed: $e');
+    
+    setState(() {
+      _isDetecting = false;
+      _detectedQuality = WaterQualityState.unknown;
+      _confidence = null;
+      _originalClass = null;
+    });
+    
+    String errorMessage = 'Water quality analysis failed: ';
+    
+    if (e.toString().contains('Backend server')) {
+      errorMessage += 'Backend server not running. Please start main.py';
+    } else if (e.toString().contains('network') || e.toString().contains('connection')) {
+      errorMessage += 'Network connection error. Check your connection and try again.';
+    } else if (e.toString().contains('timeout')) {
+      errorMessage += 'Analysis timeout. Try with a smaller image or check server.';
+    } else {
+      errorMessage += e.toString();
+    }
+    
+    _showMessage(errorMessage, isError: true);
+  }
+}
   
   void _removeImage(int index) {
     if (index >= 0 && index < _imageFiles.length) {

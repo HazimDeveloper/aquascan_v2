@@ -1,6 +1,5 @@
-
 // lib/utils/water_quality_utils.dart
-// Updated to use the new state classes from the backend
+// FIXED: Added mapping for all backend water quality classes
 
 import '../models/report_model.dart';
 import 'package:flutter/material.dart';
@@ -24,7 +23,7 @@ class WaterQualityUtils {
         return 'Low Temp & High pH';
       case WaterQualityState.unknown:
       default:
-        return 'Unknown';
+        return 'Contaminated'; // CHANGED: Show "Contaminated" instead of "Unknown"
     }
   }
   
@@ -45,7 +44,7 @@ class WaterQualityUtils {
         return Colors.purple;
       case WaterQualityState.unknown:
       default:
-        return Colors.grey;
+        return Colors.red; // CHANGED: Red for contaminated water
     }
   }
   
@@ -66,28 +65,89 @@ class WaterQualityUtils {
         return 'The water has low temperature and high pH levels. Use with caution.';
       case WaterQualityState.unknown:
       default:
-        return 'The water quality could not be determined from the provided image.';
+        return 'The water appears to be heavily contaminated. Do not use for drinking or cooking. Seek alternative water source immediately.'; // CHANGED: More specific description
     }
   }
   
-  /// Maps backend API water quality classes to the app's WaterQualityState enum
+  /// FIXED: Maps backend API water quality classes to the app's WaterQualityState enum
   static WaterQualityState mapWaterQualityClass(String waterQualityClass) {
     // Trim and standardize the input
-    final className = waterQualityClass.trim().toUpperCase();
+    final className = waterQualityClass.trim().toLowerCase();
     
-    if (className.contains('OPTIMUM')) {
+    print('🔍 Mapping water quality class: "$className"'); // Debug print
+    
+    // EXACT MATCHES FIRST for backend classes
+    switch (className) {
+      case 'heavily_contaminated':
+      case 'moderately_contaminated':
+      case 'lightly_contaminated':
+      case 'severely_contaminated':
+        print('⚠️ Mapped contaminated water ($className) to: unknown (will show as Contaminated)');
+        return WaterQualityState.unknown;
+      
+      case 'optimum':
+      case 'good':
+      case 'clean':
+        print('✅ Mapped to: optimum');
+        return WaterQualityState.optimum;
+        
+      case 'high_ph':
+        print('✅ Mapped to: highPh');
+        return WaterQualityState.highPh;
+        
+      case 'low_ph':
+        print('✅ Mapped to: lowPh');
+        return WaterQualityState.lowPh;
+        
+      case 'low_temp':
+        print('✅ Mapped to: lowTemp');
+        return WaterQualityState.lowTemp;
+        
+      case 'high_ph_high_temp':
+        print('✅ Mapped to: highPhTemp');
+        return WaterQualityState.highPhTemp;
+        
+      case 'low_temp_high_ph':
+        print('✅ Mapped to: lowTempHighPh');
+        return WaterQualityState.lowTempHighPh;
+    }
+    
+    // PARTIAL MATCHES for fallback
+    if (className.contains('contaminated') || 
+        className.contains('polluted') || 
+        className.contains('dirty') ||
+        className.contains('unsafe') ||
+        className.contains('poor') ||
+        className.contains('bad')) {
+      print('⚠️ Mapped contaminated water to: unknown (will show as Contaminated)');
+      return WaterQualityState.unknown;
+    } 
+    else if (className.contains('optimum') || className.contains('good') || className.contains('clean')) {
+      print('✅ Mapped to: optimum');
       return WaterQualityState.optimum;
-    } else if (className.contains('HIGH_PH') && className.contains('HIGH_TEMP')) {
+    } 
+    else if (className.contains('high_ph') && className.contains('high_temp')) {
+      print('✅ Mapped to: highPhTemp');
       return WaterQualityState.highPhTemp;
-    } else if (className.contains('LOW_TEMP') && className.contains('HIGH_PH')) {
+    } 
+    else if (className.contains('low_temp') && className.contains('high_ph')) {
+      print('✅ Mapped to: lowTempHighPh');
       return WaterQualityState.lowTempHighPh;
-    } else if (className.contains('HIGH_PH')) {
+    } 
+    else if (className.contains('high_ph') || className.contains('alkaline')) {
+      print('✅ Mapped to: highPh');
       return WaterQualityState.highPh;
-    } else if (className.contains('LOW_PH')) {
+    } 
+    else if (className.contains('low_ph') || className.contains('acidic')) {
+      print('✅ Mapped to: lowPh');
       return WaterQualityState.lowPh;
-    } else if (className.contains('LOW_TEMP')) {
+    } 
+    else if (className.contains('low_temp') || className.contains('cold')) {
+      print('✅ Mapped to: lowTemp');
       return WaterQualityState.lowTemp;
-    } else {
+    }
+    else {
+      print('❓ No mapping found, defaulting to: unknown');
       return WaterQualityState.unknown;
     }
   }
@@ -108,7 +168,7 @@ class WaterQualityUtils {
         return Icons.warning;
       case WaterQualityState.unknown:
       default:
-        return Icons.help_outline;
+        return Icons.dangerous; // CHANGED: Use "dangerous" icon for contaminated water
     }
   }
 }
