@@ -1,4 +1,6 @@
-// lib/screens/simplified/simple_report_screen.dart - COMPLETE REDESIGNED VERSION
+// lib/screens/simplified/simple_report_screen.dart - LOCAL STORAGE VERSION
+// Key changes: Handle local file paths instead of Firebase URLs
+
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -34,14 +36,14 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
   final _addressController = TextEditingController();
   final _reporterNameController = TextEditingController();
   
-  // Image handling
+  // Image handling - NOW USING LOCAL PATHS
   List<File> _imageFiles = [];
-  Map<String, Uint8List> _imageBytes = {};
-  final int _maxImages = 10; // More for admin
+  List<String> _savedImagePaths = []; // Local file paths instead of URLs
+  final int _maxImages = 10;
   
   bool _isLoading = false;
   bool _isDetecting = false;
-  bool _isUploadingImages = false;
+  bool _isSavingImages = false; // Changed from _isUploadingImages
   WaterQualityState _detectedQuality = WaterQualityState.unknown;
   double? _confidence;
   String? _originalClass;
@@ -64,7 +66,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
     _locationService = Provider.of<LocationService>(context, listen: false);
     _apiService = Provider.of<ApiService>(context, listen: false);
     
-    // Set default reporter name based on role
     _reporterNameController.text = widget.isAdmin ? 'Admin User' : 'Test User';
     
     _logDebug('SimpleReportScreen initialized (isAdmin: ${widget.isAdmin})');
@@ -224,53 +225,63 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(
         source: source, 
-        imageQuality: widget.isAdmin ? 90 : 85, // Higher quality for admin
+        imageQuality: widget.isAdmin ? 90 : 85,
         maxWidth: 1920,
         maxHeight: 1080,
       );
       
       if (pickedFile != null) {
-        final Uint8List imageBytes = await pickedFile.readAsBytes();
+        final File imageFile = File(pickedFile.path);
         
-        if (imageBytes.isEmpty) {
-          _showMessage('Error: Could not read image data', isError: true);
+        if (!await imageFile.exists()) {
+          _showMessage('Error: Could not access selected image', isError: true);
           return;
         }
         
+        // Save image to local storage immediately
         try {
-          final Directory appDocDir = await getApplicationDocumentsDirectory();
-          final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-          final String fileName = '${widget.isAdmin ? 'admin' : 'user'}_report_$timestamp.jpg';
-          final String permanentPath = path.join(appDocDir.path, fileName);
+          setState(() {
+            _isSavingImages = true;
+          });
           
-          final File permanentFile = File(permanentPath);
-          await permanentFile.writeAsBytes(imageBytes);
+          final folder = widget.isAdmin ? 'admin_reports' : 'reports';
+          final localPath = await _storageService.uploadImage(imageFile, folder);
           
-          if (await permanentFile.exists()) {
+          _logDebug('Image saved to local storage: $localPath');
+          
+          setState(() {
+            _imageFiles.add(File(localPath)); // Add the saved file
+            _savedImagePaths.add(localPath); // Track the local path
+            _isSavingImages = false;
+          });
+          
+          // Reset analysis results when new image added
+          if (_imageFiles.length == 1) {
             setState(() {
-              _imageFiles.add(permanentFile);
-              _imageBytes[permanentFile.path] = imageBytes;
+              _detectedQuality = WaterQualityState.unknown;
+              _confidence = null;
+              _originalClass = null;
             });
-            
-            // Reset previous analysis results when new image added
-            if (_imageFiles.length == 1) {
-              setState(() {
-                _detectedQuality = WaterQualityState.unknown;
-                _confidence = null;
-                _originalClass = null;
-              });
-            }
           }
+          
+          _showMessage('Image saved locally!', isError: false);
+          
         } catch (e) {
-          _showMessage('Error processing image: $e', isError: true);
+          setState(() {
+            _isSavingImages = false;
+          });
+          _showMessage('Error saving image: $e', isError: true);
         }
       }
     } catch (e) {
+      setState(() {
+        _isSavingImages = false;
+      });
       _showMessage('Error picking image: $e', isError: true);
     }
   }
   
-  // REAL BACKEND WATER QUALITY DETECTION
+  // Water quality detection - unchanged
   Future<void> _detectWaterQuality(File image) async {
     try {
       setState(() {
@@ -283,7 +294,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       _logDebug('🔬 Starting REAL water quality detection...');
       _logDebug('📁 Image file: ${image.path}');
       
-      // Validate image file
       if (!await image.exists()) {
         throw Exception('Image file does not exist');
       }
@@ -295,7 +305,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
         throw Exception('Image file is empty');
       }
       
-      // Test backend connection
       _logDebug('🔗 Testing backend connection...');
       final isConnected = await _apiService.testBackendConnection();
       if (!isConnected) {
@@ -304,7 +313,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       
       _logDebug('✅ Backend connected, sending image for analysis...');
       
-      // Call real API analysis
       final result = await _apiService.analyzeWaterQualityWithConfidence(image);
       
       _logDebug('✅ Real API Analysis completed');
@@ -312,7 +320,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       _logDebug('📊 Confidence: ${result.confidence}%');
       _logDebug('🏷️ Original class: ${result.originalClass}');
       
-      // Validate results
       if (result.waterQuality == WaterQualityState.unknown && result.confidence == 0.0) {
         throw Exception('Backend returned invalid analysis results');
       }
@@ -324,7 +331,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
         _isDetecting = false;
       });
       
-      // Show success message with real results
       _showMessage(
         'Analysis Complete: ${WaterQualityUtils.getWaterQualityText(result.waterQuality)} (${result.confidence.toStringAsFixed(1)}% confidence)',
         isError: false,
@@ -340,7 +346,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
         _originalClass = null;
       });
       
-      // Show specific error messages
       String errorMessage = 'Water quality analysis failed: ';
       
       if (e.toString().contains('Backend server')) {
@@ -360,10 +365,11 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
   void _removeImage(int index) {
     if (index >= 0 && index < _imageFiles.length) {
       final file = _imageFiles[index];
+      final localPath = _savedImagePaths[index];
       
       setState(() {
         _imageFiles.removeAt(index);
-        _imageBytes.remove(file.path);
+        _savedImagePaths.removeAt(index);
         
         if (_imageFiles.isEmpty) {
           _detectedQuality = WaterQualityState.unknown;
@@ -372,16 +378,19 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
         }
       });
       
+      // Optionally delete the local file
       try {
         if (file.existsSync()) {
           file.deleteSync();
+          _logDebug('Deleted local file: $localPath');
         }
       } catch (e) {
-        _logDebug('Error deleting file: $e');
+        _logDebug('Error deleting local file: $e');
       }
     }
   }
   
+  // UPDATED: Submit report with local paths
   Future<void> _submitReport() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -399,25 +408,16 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
     try {
       _logDebug('Starting report submission...');
       
-      // Upload images
-      List<String> imageUrls = [];
+      // No need to upload - images already saved locally
+      // Use the saved local paths directly
+      final imageUrls = List<String>.from(_savedImagePaths);
       
-      if (_imageFiles.isNotEmpty) {
-        setState(() {
-          _isUploadingImages = true;
-        });
-        
-        imageUrls = await _storageService.uploadImages(
-          _imageFiles, 
-          widget.isAdmin ? 'admin_reports' : 'reports',
-        );
-        
-        setState(() {
-          _isUploadingImages = false;
-        });
+      _logDebug('Using ${imageUrls.length} local image paths');
+      for (int i = 0; i < imageUrls.length; i++) {
+        _logDebug('Image ${i + 1}: ${imageUrls[i]}');
       }
       
-      // Create the report
+      // Create the report with local paths
       final now = DateTime.now();
       final report = ReportModel(
         id: '',
@@ -427,7 +427,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
         description: _descriptionController.text.trim(),
         location: _location!,
         address: _addressController.text.trim(),
-        imageUrls: imageUrls,
+        imageUrls: imageUrls, // These are now local paths
         waterQuality: _detectedQuality,
         isResolved: false,
         createdAt: now,
@@ -440,7 +440,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       
       if (mounted) {
         _showMessage(
-          'Report submitted successfully with ${imageUrls.length} image${imageUrls.length == 1 ? '' : 's'}!',
+          'Report submitted successfully with ${imageUrls.length} image${imageUrls.length == 1 ? '' : 's'} (saved locally)!',
           isError: false,
         );
         
@@ -453,7 +453,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _isUploadingImages = false;
         });
       }
     }
@@ -501,20 +500,27 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
                     color: Colors.white.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    '${_imageFiles.length}/$_maxImages',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.folder, size: 12, color: Colors.white),
+                      SizedBox(width: 4),
+                      Text(
+                        '${_imageFiles.length}/$_maxImages',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
         ],
       ),
-      body: _isLoading && !_isUploadingImages
+      body: _isLoading && !_isSavingImages
         ? Center(
             child: WaterFillLoader(
               message: 'Getting your location...',
@@ -549,6 +555,442 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
     );
   }
   
+  // UPDATED: Modern image tile to show local images
+  Widget _buildModernImageTile(int index, Color themeColor) {
+    final isMainPhoto = index == 0;
+    final file = _imageFiles[index];
+    
+    return Stack(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: isMainPhoto 
+                ? Border.all(color: themeColor, width: 3)
+                : Border.all(color: Colors.grey.shade300, width: 1),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: Container(
+              width: double.infinity,
+              height: double.infinity,
+              child: file.existsSync()
+                  ? Image.file(
+                      file,
+                      fit: BoxFit.cover,
+                    )
+                  : Container(
+                      color: Colors.grey.shade200,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.folder, color: Colors.grey.shade400, size: 20),
+                          SizedBox(height: 4),
+                          Text(
+                            'Local\nStorage',
+                            style: TextStyle(
+                              fontSize: 8,
+                              color: Colors.grey.shade600,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+            ),
+          ),
+        ),
+        
+        // Main photo badge
+        if (isMainPhoto)
+          Positioned(
+            top: 4,
+            left: 4,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: themeColor,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                'MAIN',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        
+        // Local storage indicator
+        Positioned(
+          bottom: 4,
+          left: 4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.storage, color: Colors.white, size: 8),
+                SizedBox(width: 2),
+                Text(
+                  'LOCAL',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 6,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        // Remove button
+        Positioned(
+          top: 4,
+          right: 4,
+          child: GestureDetector(
+            onTap: () => _removeImage(index),
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.close,
+                color: Colors.white,
+                size: 12,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Keep all other build methods the same as original but update image section
+  Widget _buildImageSection(Color themeColor) {
+    return Column(
+      children: [
+        // Header Card
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  themeColor.withOpacity(0.1),
+                  themeColor.withOpacity(0.05),
+                ],
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: themeColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.folder,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.isAdmin ? 'Local Evidence Collection' : 'Local Water Photos',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${_imageFiles.length}/$_maxImages photos saved locally',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_imageFiles.length < _maxImages)
+                        Container(
+                          decoration: BoxDecoration(
+                            color: themeColor,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: IconButton(
+                            onPressed: _isSavingImages ? null : _pickImage,
+                            icon: _isSavingImages 
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  )
+                                : Icon(Icons.add, color: Colors.white),
+                            tooltip: 'Add Photo',
+                          ),
+                        ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Local Storage Info Banner
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.storage, color: Colors.white, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Local Storage + AI Analysis',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Images saved to device storage, AI analysis via backend',
+                                style: TextStyle(
+                                  color: Colors.green.shade600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Photos Grid Card
+        if (_imageFiles.isNotEmpty)
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Saved Photos',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Spacer(),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.storage, size: 12, color: Colors.green.shade700),
+                            SizedBox(width: 4),
+                            Text(
+                              'Local Storage',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                    ),
+                    itemCount: _imageFiles.length,
+                    itemBuilder: (context, index) {
+                      return _buildModernImageTile(index, themeColor);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        
+        const SizedBox(height: 16),
+        
+        // Camera Button Card with local storage info
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Icon(
+                  _isSavingImages ? Icons.hourglass_empty : Icons.add_a_photo,
+                  size: 48,
+                  color: _isSavingImages 
+                      ? Colors.orange 
+                      : _imageFiles.length < _maxImages 
+                          ? themeColor 
+                          : Colors.grey.shade400,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _isSavingImages
+                      ? 'Saving to Local Storage...'
+                      : _imageFiles.isEmpty 
+                          ? 'Take Your First Photo' 
+                          : _imageFiles.length < _maxImages 
+                              ? 'Add Another Photo' 
+                              : 'Maximum Photos Reached',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: _isSavingImages || _imageFiles.length < _maxImages 
+                        ? Colors.black87 
+                        : Colors.grey.shade600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _isSavingImages
+                      ? 'Please wait while image is being saved...'
+                      : _imageFiles.isEmpty
+                          ? 'Images will be saved to local device storage'
+                          : 'Multiple photos help improve AI analysis accuracy',
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: (_imageFiles.length < _maxImages && !_isSavingImages) ? _pickImage : null,
+                    icon: _isSavingImages
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : Icon(
+                            _imageFiles.isEmpty ? Icons.camera_alt : Icons.add_a_photo,
+                          ),
+                    label: Text(
+                      _isSavingImages
+                          ? 'Saving...'
+                          : _imageFiles.isEmpty 
+                              ? 'Take Photo' 
+                              : _imageFiles.length < _maxImages 
+                                  ? 'Add More Photos' 
+                                  : 'Limit Reached',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _imageFiles.length < _maxImages && !_isSavingImages
+                          ? themeColor 
+                          : Colors.grey.shade400,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Analysis State Cards (keep same as before)
+        if (_isDetecting)
+          _buildModernAnalyzingCard(themeColor)
+        else if (_detectedQuality != WaterQualityState.unknown || _confidence != null)
+          _buildModernResultCard(themeColor)
+        else if (_imageFiles.isNotEmpty)
+          _buildModernAnalysisPrompt(themeColor),
+      ],
+    );
+  }
+
+  // Keep all other build methods the same...
+  // (I'll include just a few key ones for brevity)
+
   Widget _buildAdminIndicator() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -599,7 +1041,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Creating report with admin privileges and enhanced AI analysis features',
+                        'Images will be saved to local storage with admin privileges',
                         style: TextStyle(
                           color: Colors.orange.shade800,
                           fontSize: 14,
@@ -616,346 +1058,8 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       ),
     );
   }
-  
-  // REDESIGNED: Modern image section with better layout
-  Widget _buildImageSection(Color themeColor) {
-    return Column(
-      children: [
-        // Header Card
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  themeColor.withOpacity(0.1),
-                  themeColor.withOpacity(0.05),
-                ],
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                children: [
-                  // Title Row
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: themeColor,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.camera_alt,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.isAdmin ? 'Evidence Collection' : 'Water Photos',
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${_imageFiles.length}/$_maxImages photos uploaded',
-                              style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_imageFiles.length < _maxImages)
-                        Container(
-                          decoration: BoxDecoration(
-                            color: themeColor,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: IconButton(
-                            onPressed: _pickImage,
-                            icon: Icon(Icons.add, color: Colors.white),
-                            tooltip: 'Add Photo',
-                          ),
-                        ),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 16),
-                  
-                  // Backend Requirements Banner
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.blue.shade200),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.blue,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(Icons.psychology, color: Colors.white, size: 20),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'AI-Powered Analysis',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blue.shade800,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Real-time water quality assessment via Python backend',
-                                style: TextStyle(
-                                  color: Colors.blue.shade600,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        
-        const SizedBox(height: 16),
-        
-        // Photos Grid Card
-        if (_imageFiles.isNotEmpty)
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Uploaded Photos',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                    ),
-                    itemCount: _imageFiles.length,
-                    itemBuilder: (context, index) {
-                      return _buildModernImageTile(index, themeColor);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        
-        const SizedBox(height: 16),
-        
-        // Camera Button Card
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.add_a_photo,
-                  size: 48,
-                  color: _imageFiles.length < _maxImages 
-                      ? themeColor 
-                      : Colors.grey.shade400,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _imageFiles.isEmpty 
-                      ? 'Take Your First Photo' 
-                      : _imageFiles.length < _maxImages 
-                          ? 'Add Another Photo' 
-                          : 'Maximum Photos Reached',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: _imageFiles.length < _maxImages 
-                        ? Colors.black87 
-                        : Colors.grey.shade600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _imageFiles.isEmpty
-                      ? 'Capture clear images for accurate AI analysis'
-                      : 'Multiple angles help improve analysis accuracy',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _imageFiles.length < _maxImages ? _pickImage : null,
-                    icon: Icon(
-                      _imageFiles.isEmpty ? Icons.camera_alt : Icons.add_a_photo,
-                    ),
-                    label: Text(
-                      _imageFiles.isEmpty 
-                          ? 'Take Photo' 
-                          : _imageFiles.length < _maxImages 
-                              ? 'Add More Photos' 
-                              : 'Limit Reached',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _imageFiles.length < _maxImages 
-                          ? themeColor 
-                          : Colors.grey.shade400,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        
-        const SizedBox(height: 16),
-        
-        // Analysis State Cards
-        if (_isDetecting)
-          _buildModernAnalyzingCard(themeColor)
-        else if (_detectedQuality != WaterQualityState.unknown || _confidence != null)
-          _buildModernResultCard(themeColor)
-        else if (_imageFiles.isNotEmpty)
-          _buildModernAnalysisPrompt(themeColor),
-      ],
-    );
-  }
-  
-  // REDESIGNED: Modern image tile
-  Widget _buildModernImageTile(int index, Color themeColor) {
-    final isMainPhoto = index == 0;
-    
-    return Stack(
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: isMainPhoto 
-                ? Border.all(color: themeColor, width: 3)
-                : Border.all(color: Colors.grey.shade300, width: 1),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(11),
-            child: Container(
-              width: double.infinity,
-              height: double.infinity,
-              child: _imageFiles[index].existsSync()
-                  ? Image.file(
-                      _imageFiles[index],
-                      fit: BoxFit.cover,
-                    )
-                  : Container(
-                      color: Colors.grey.shade200,
-                      child: Icon(Icons.image, color: Colors.grey.shade400),
-                    ),
-            ),
-          ),
-        ),
-        
-        // Main photo badge
-        if (isMainPhoto)
-          Positioned(
-            top: 4,
-            left: 4,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: themeColor,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                'MAIN',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 8,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        
-        // Remove button
-        Positioned(
-          top: 4,
-          right: 4,
-          child: GestureDetector(
-            onTap: () => _removeImage(index),
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                Icons.close,
-                color: Colors.white,
-                size: 12,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-  
-  // REDESIGNED: Modern analyzing state
+
+  // Include other build methods here (same as original)...
   Widget _buildModernAnalyzingCard(Color themeColor) {
     return Card(
       elevation: 4,
@@ -976,7 +1080,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
-              // Animated loading circle
               Container(
                 width: 80,
                 height: 80,
@@ -1054,8 +1157,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       ),
     );
   }
-  
-  // REDESIGNED: Modern analysis prompt
+
   Widget _buildModernAnalysisPrompt(Color themeColor) {
     return Card(
       elevation: 3,
@@ -1103,7 +1205,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
               const SizedBox(height: 8),
               
               Text(
-                'Your photos are ready to be analyzed by our AI system. Get instant water quality assessment with confidence scores.',
+                'Your locally saved photos are ready to be analyzed by our AI system. Get instant water quality assessment with confidence scores.',
                 style: TextStyle(
                   color: Colors.grey.shade700,
                   fontSize: 14,
@@ -1143,8 +1245,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       ),
     );
   }
-  
-  // REDESIGNED: Modern result card with better layout
+
   Widget _buildModernResultCard(Color themeColor) {
     final qualityColor = WaterQualityUtils.getWaterQualityColor(_detectedQuality);
     
@@ -1217,7 +1318,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                'Backend: main.py',
+                                'Local + Backend Analysis',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: Colors.green.shade700,
@@ -1253,7 +1354,6 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Water quality result
                     Row(
                       children: [
                         Container(
@@ -1413,7 +1513,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Admin Mode: Enhanced analysis with detailed metrics and classification data',
+                          'Admin Mode: Enhanced analysis with local storage and detailed metrics',
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.orange.shade800,
@@ -1431,7 +1531,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
       ),
     );
   }
-  
+
   Widget _buildDetailsSection() {
     return Card(
       elevation: 2,
@@ -1564,7 +1664,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
           ),
         ),
         child: ElevatedButton(
-          onPressed: (_isLoading || _isUploadingImages) ? null : _submitReport,
+          onPressed: (_isLoading || _isSavingImages) ? null : _submitReport,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
@@ -1574,7 +1674,7 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
             ),
             elevation: 0,
           ),
-          child: _isLoading || _isUploadingImages
+          child: _isLoading || _isSavingImages
               ? Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -1588,8 +1688,8 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
                     ),
                     const SizedBox(width: 16),
                     Text(
-                      _isUploadingImages 
-                        ? 'Uploading ${_imageFiles.length} photos...'
+                      _isSavingImages 
+                        ? 'Saving ${_imageFiles.length} photos locally...'
                         : widget.isAdmin
                           ? 'Creating admin report...'
                           : 'Submitting report...',
@@ -1638,14 +1738,13 @@ class _SimpleReportScreenState extends State<SimpleReportScreen> {
     _addressController.dispose();
     _reporterNameController.dispose();
     
-    // Clean up temporary files
+    // Clean up temporary files if any
     for (final file in _imageFiles) {
       try {
-        if (file.existsSync()) {
-          file.deleteSync();
-        }
+        // Don't delete saved images on dispose - they're meant to be permanent
+        _logDebug('Keeping saved file: ${file.path}');
       } catch (e) {
-        _logDebug('Error cleaning up file: ${file.path} - $e');
+        _logDebug('Note: ${file.path} - $e');
       }
     }
     

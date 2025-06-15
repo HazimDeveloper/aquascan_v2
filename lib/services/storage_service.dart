@@ -1,53 +1,43 @@
-// SOLUTION 1: Enhanced StorageService with better error handling
-// lib/services/storage_service.dart - UPDATED VERSION
-
+// lib/services/storage_service.dart - LOCAL STORAGE VERSION
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
 
 class StorageService {
-  final FirebaseStorage _storage = FirebaseStorage.instance;
   final bool _debugMode = true;
   
   void _logDebug(String message) {
     if (_debugMode) {
-      print('🔥 StorageService: $message');
+      print('📁 LocalStorage: $message');
     }
   }
   
-  /// Test Firebase Storage connection
-  Future<bool> testStorageConnection() async {
-    try {
-      _logDebug('Testing Firebase Storage connection...');
-      
-      // Try to get a reference - this will fail if Storage is not configured
-      final ref = _storage.ref().child('test');
-      await ref.getDownloadURL().catchError((e) {
-        // This error is expected for non-existent files, but confirms Storage works
-        _logDebug('Storage test completed (expected error for non-existent file)');
-        return '';
-      });
-      
-      _logDebug('✅ Firebase Storage connection successful');
-      return true;
-    } catch (e) {
-      _logDebug('❌ Firebase Storage connection failed: $e');
-      return false;
+  /// Get local storage directory for images
+  Future<Directory> _getImageStorageDirectory() async {
+    final Directory appDocDir = await getApplicationDocumentsDirectory();
+    final Directory imageDir = Directory(path.join(appDocDir.path, 'aquascan_images'));
+    
+    // Create directory if it doesn't exist
+    if (!await imageDir.exists()) {
+      await imageDir.create(recursive: true);
+      _logDebug('Created image directory: ${imageDir.path}');
     }
+    
+    return imageDir;
   }
   
-  /// Upload image with comprehensive error handling and retry logic
+  /// Upload image to local storage - returns local file path
   Future<String> uploadImage(File file, String folder) async {
     try {
-      _logDebug('=== STARTING IMAGE UPLOAD ===');
-      _logDebug('File path: ${file.path}');
+      _logDebug('=== STARTING LOCAL IMAGE SAVE ===');
+      _logDebug('Source file: ${file.path}');
       _logDebug('Folder: $folder');
       
-      // STEP 1: Validate file exists and is readable
+      // STEP 1: Validate source file
       if (!await file.exists()) {
-        throw Exception('File does not exist: ${file.path}');
+        throw Exception('Source file does not exist: ${file.path}');
       }
       
       final fileSize = await file.length();
@@ -57,25 +47,16 @@ class StorageService {
         throw Exception('File is empty: ${file.path}');
       }
       
-      if (fileSize > 10 * 1024 * 1024) { // 10MB limit
-        throw Exception('File too large: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
+      // STEP 2: Get storage directory
+      final imageDir = await _getImageStorageDirectory();
+      final folderDir = Directory(path.join(imageDir.path, folder));
+      
+      if (!await folderDir.exists()) {
+        await folderDir.create(recursive: true);
+        _logDebug('Created folder: ${folderDir.path}');
       }
       
-      // STEP 2: Test Storage connection first
-      final isConnected = await testStorageConnection();
-      if (!isConnected) {
-        throw Exception('Firebase Storage is not accessible. Please check your configuration.');
-      }
-      
-      // STEP 3: Read file bytes
-      _logDebug('Reading file bytes...');
-      final Uint8List bytes = await file.readAsBytes();
-      if (bytes.isEmpty) {
-        throw Exception('Could not read file data');
-      }
-      _logDebug('Successfully read ${bytes.length} bytes');
-      
-      // STEP 4: Generate unique filename
+      // STEP 3: Generate unique filename
       final uuid = Uuid();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final extension = path.extension(file.path).toLowerCase();
@@ -84,105 +65,54 @@ class StorageService {
       
       _logDebug('Generated filename: $fileName');
       
-      // STEP 5: Create storage reference
-      final storageRef = _storage.ref().child('$folder/$fileName');
-      _logDebug('Storage path: ${storageRef.fullPath}');
+      // STEP 4: Copy file to local storage
+      final destinationPath = path.join(folderDir.path, fileName);
+      final destinationFile = File(destinationPath);
       
-      // STEP 6: Upload with metadata and progress tracking
-      _logDebug('Starting upload...');
+      _logDebug('Copying to: $destinationPath');
       
-      final metadata = SettableMetadata(
-        contentType: _getContentType(validExtension),
-        customMetadata: {
-          'source': 'aquascan_app',
-          'originalName': path.basename(file.path),
-          'uploadTime': DateTime.now().toIso8601String(),
-          'fileSize': fileSize.toString(),
-        },
-      );
+      // Copy file
+      await file.copy(destinationPath);
       
-      final uploadTask = storageRef.putData(bytes, metadata);
-      
-      // Monitor upload progress
-      uploadTask.snapshotEvents.listen(
-        (TaskSnapshot snapshot) {
-          final progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          _logDebug('Upload progress: ${progress.toStringAsFixed(1)}%');
-        },
-        onError: (error) {
-          _logDebug('Upload progress error: $error');
-        },
-      );
-      
-      // Wait for upload completion with timeout
-      final snapshot = await uploadTask.timeout(
-        const Duration(minutes: 2),
-        onTimeout: () {
-          throw Exception('Upload timeout after 2 minutes');
-        },
-      );
-      
-      _logDebug('Upload completed, getting download URL...');
-      
-      // STEP 7: Get download URL with retry logic
-      String downloadUrl = '';
-      for (int attempt = 1; attempt <= 3; attempt++) {
-        try {
-          downloadUrl = await snapshot.ref.getDownloadURL();
-          break;
-        } catch (e) {
-          _logDebug('Download URL attempt $attempt failed: $e');
-          if (attempt == 3) rethrow;
-          await Future.delayed(Duration(seconds: attempt));
-        }
+      // STEP 5: Verify the copied file
+      if (!await destinationFile.exists()) {
+        throw Exception('Failed to save file to local storage');
       }
       
-      if (downloadUrl.isEmpty) {
-        throw Exception('Failed to get download URL');
+      final savedFileSize = await destinationFile.length();
+      if (savedFileSize != fileSize) {
+        throw Exception('File size mismatch after copy');
       }
       
-      _logDebug('✅ Upload successful!');
-      _logDebug('Download URL: $downloadUrl');
-      _logDebug('=== UPLOAD COMPLETE ===');
+      _logDebug('✅ File saved successfully!');
+      _logDebug('Local path: $destinationPath');
+      _logDebug('File size verified: ${(savedFileSize / 1024).toStringAsFixed(2)} KB');
+      _logDebug('=== SAVE COMPLETE ===');
       
-      return downloadUrl;
+      return destinationPath; // Return local file path instead of URL
       
     } catch (e) {
-      _logDebug('❌ Upload failed: $e');
-      
-      // Provide specific error messages
-      if (e.toString().contains('storage/unauthorized')) {
-        throw Exception('Storage access denied. Please check Firebase Storage rules.');
-      } else if (e.toString().contains('storage/network-error')) {
-        throw Exception('Network error. Please check your internet connection.');
-      } else if (e.toString().contains('storage/quota-exceeded')) {
-        throw Exception('Storage quota exceeded. Please contact support.');
-      } else if (e.toString().contains('timeout')) {
-        throw Exception('Upload timeout. Please try again with a smaller image.');
-      } else {
-        throw Exception('Upload failed: ${e.toString()}');
-      }
+      _logDebug('❌ Local save failed: $e');
+      throw Exception('Failed to save image locally: ${e.toString()}');
     }
   }
   
-  /// Upload image data directly from bytes
+  /// Upload image data directly from bytes to local storage
   Future<String> uploadImageData(Uint8List imageData, String folder) async {
     try {
-      _logDebug('=== STARTING DATA UPLOAD ===');
+      _logDebug('=== STARTING LOCAL DATA SAVE ===');
       _logDebug('Data size: ${(imageData.length / 1024).toStringAsFixed(2)} KB');
       
       if (imageData.isEmpty) {
         throw Exception('Image data is empty');
       }
       
-      if (imageData.length > 10 * 1024 * 1024) {
-        throw Exception('Image data too large: ${(imageData.length / 1024 / 1024).toStringAsFixed(2)} MB');
-      }
+      // Get storage directory
+      final imageDir = await _getImageStorageDirectory();
+      final folderDir = Directory(path.join(imageDir.path, folder));
       
-      // Test connection
-      final isConnected = await testStorageConnection();
-      if (!isConnected) {
-        throw Exception('Firebase Storage is not accessible');
+      if (!await folderDir.exists()) {
+        await folderDir.create(recursive: true);
       }
       
       // Generate filename
@@ -192,48 +122,36 @@ class StorageService {
       
       _logDebug('Generated filename: $fileName');
       
-      // Create reference and upload
-      final storageRef = _storage.ref().child('$folder/$fileName');
+      // Save data to file
+      final destinationPath = path.join(folderDir.path, fileName);
+      final destinationFile = File(destinationPath);
       
-      final metadata = SettableMetadata(
-        contentType: 'image/jpeg',
-        customMetadata: {
-          'source': 'aquascan_app_data',
-          'uploadTime': DateTime.now().toIso8601String(),
-          'dataSize': imageData.length.toString(),
-        },
-      );
+      _logDebug('Saving data to: $destinationPath');
+      await destinationFile.writeAsBytes(imageData);
       
-      _logDebug('Starting data upload...');
-      final uploadTask = storageRef.putData(imageData, metadata);
+      // Verify
+      if (!await destinationFile.exists()) {
+        throw Exception('Failed to save data to local storage');
+      }
       
-      final snapshot = await uploadTask.timeout(
-        const Duration(minutes: 2),
-        onTimeout: () {
-          throw Exception('Data upload timeout');
-        },
-      );
+      _logDebug('✅ Data saved successfully!');
+      _logDebug('Local path: $destinationPath');
       
-      final downloadUrl = await snapshot.ref.getDownloadURL();
-      
-      _logDebug('✅ Data upload successful!');
-      _logDebug('Download URL: $downloadUrl');
-      
-      return downloadUrl;
+      return destinationPath;
       
     } catch (e) {
-      _logDebug('❌ Data upload failed: $e');
-      throw Exception('Data upload failed: ${e.toString()}');
+      _logDebug('❌ Local data save failed: $e');
+      throw Exception('Data save failed: ${e.toString()}');
     }
   }
   
-  /// Upload multiple images with individual error handling
+  /// Upload multiple images to local storage
   Future<List<String>> uploadImages(List<File> files, String folder) async {
-    _logDebug('=== UPLOADING ${files.length} IMAGES ===');
+    _logDebug('=== UPLOADING ${files.length} IMAGES TO LOCAL STORAGE ===');
     
     if (files.isEmpty) return [];
     
-    final List<String> successfulUrls = [];
+    final List<String> successfulPaths = [];
     final List<String> failedFiles = [];
     
     for (int i = 0; i < files.length; i++) {
@@ -241,53 +159,172 @@ class StorageService {
       _logDebug('Processing image ${i + 1}/${files.length}: ${file.path}');
       
       try {
-        final url = await uploadImage(file, folder);
-        successfulUrls.add(url);
-        _logDebug('✅ Image ${i + 1} uploaded successfully');
+        final localPath = await uploadImage(file, folder);
+        successfulPaths.add(localPath);
+        _logDebug('✅ Image ${i + 1} saved to local storage');
       } catch (e) {
         _logDebug('❌ Image ${i + 1} failed: $e');
         failedFiles.add(path.basename(file.path));
       }
     }
     
-    _logDebug('=== UPLOAD SUMMARY ===');
-    _logDebug('Successful: ${successfulUrls.length}/${files.length}');
+    _logDebug('=== LOCAL SAVE SUMMARY ===');
+    _logDebug('Successful: ${successfulPaths.length}/${files.length}');
     _logDebug('Failed: ${failedFiles.length}');
     
     if (failedFiles.isNotEmpty) {
       _logDebug('Failed files: ${failedFiles.join(', ')}');
     }
     
-    return successfulUrls;
+    return successfulPaths;
   }
   
-  /// Get appropriate content type for file extension
-  String _getContentType(String extension) {
-    switch (extension.toLowerCase()) {
-      case '.jpg':
-      case '.jpeg':
-        return 'image/jpeg';
-      case '.png':
-        return 'image/png';
-      case '.gif':
-        return 'image/gif';
-      case '.webp':
-        return 'image/webp';
-      default:
-        return 'image/jpeg';
+  /// Check if local file exists
+  Future<bool> fileExists(String localPath) async {
+    try {
+      final file = File(localPath);
+      return await file.exists();
+    } catch (e) {
+      _logDebug('Error checking file existence: $e');
+      return false;
     }
   }
   
-  /// Delete an image from storage
-  Future<void> deleteImage(String imageUrl) async {
+  /// Get file from local path
+  File? getLocalFile(String localPath) {
     try {
-      _logDebug('Deleting image: $imageUrl');
-      final ref = _storage.refFromURL(imageUrl);
-      await ref.delete();
-      _logDebug('✅ Image deleted successfully');
+      final file = File(localPath);
+      return file;
     } catch (e) {
-      _logDebug('❌ Error deleting image: $e');
-      throw Exception('Failed to delete image: $e');
+      _logDebug('Error getting local file: $e');
+      return null;
+    }
+  }
+  
+  /// Delete local image file
+  Future<void> deleteImage(String localPath) async {
+    try {
+      _logDebug('Deleting local image: $localPath');
+      final file = File(localPath);
+      
+      if (await file.exists()) {
+        await file.delete();
+        _logDebug('✅ Local image deleted successfully');
+      } else {
+        _logDebug('⚠️ File does not exist: $localPath');
+      }
+    } catch (e) {
+      _logDebug('❌ Error deleting local image: $e');
+      throw Exception('Failed to delete local image: $e');
+    }
+  }
+  
+  /// Get all saved images in a folder
+  Future<List<String>> getAllImagesInFolder(String folder) async {
+    try {
+      final imageDir = await _getImageStorageDirectory();
+      final folderDir = Directory(path.join(imageDir.path, folder));
+      
+      if (!await folderDir.exists()) {
+        return [];
+      }
+      
+      final files = await folderDir.list().toList();
+      final imagePaths = files
+          .where((file) => file is File)
+          .map((file) => file.path)
+          .where((filePath) {
+            final ext = path.extension(filePath).toLowerCase();
+            return ['.jpg', '.jpeg', '.png'].contains(ext);
+          })
+          .toList();
+      
+      _logDebug('Found ${imagePaths.length} images in folder: $folder');
+      return imagePaths;
+      
+    } catch (e) {
+      _logDebug('Error getting images from folder: $e');
+      return [];
+    }
+  }
+  
+  /// Clean up old images (optional - for storage management)
+  Future<void> cleanupOldImages(String folder, {int maxAgeInDays = 30}) async {
+    try {
+      final imageDir = await _getImageStorageDirectory();
+      final folderDir = Directory(path.join(imageDir.path, folder));
+      
+      if (!await folderDir.exists()) {
+        return;
+      }
+      
+      final cutoffDate = DateTime.now().subtract(Duration(days: maxAgeInDays));
+      final files = await folderDir.list().toList();
+      
+      int deletedCount = 0;
+      for (final file in files) {
+        if (file is File) {
+          final stat = await file.stat();
+          if (stat.modified.isBefore(cutoffDate)) {
+            await file.delete();
+            deletedCount++;
+          }
+        }
+      }
+      
+      _logDebug('Cleanup complete: deleted $deletedCount old files from $folder');
+      
+    } catch (e) {
+      _logDebug('Error during cleanup: $e');
+    }
+  }
+  
+  /// Get storage info
+  Future<Map<String, dynamic>> getStorageInfo() async {
+    try {
+      final imageDir = await _getImageStorageDirectory();
+      final folders = ['reports', 'admin_reports'];
+      
+      int totalFiles = 0;
+      int totalSizeBytes = 0;
+      Map<String, int> folderCounts = {};
+      
+      for (final folder in folders) {
+        final folderDir = Directory(path.join(imageDir.path, folder));
+        if (await folderDir.exists()) {
+          final files = await folderDir.list().toList();
+          int folderFileCount = 0;
+          
+          for (final file in files) {
+            if (file is File) {
+              final stat = await file.stat();
+              totalSizeBytes += stat.size;
+              folderFileCount++;
+            }
+          }
+          
+          folderCounts[folder] = folderFileCount;
+          totalFiles += folderFileCount;
+        } else {
+          folderCounts[folder] = 0;
+        }
+      }
+      
+      return {
+        'total_files': totalFiles,
+        'total_size_mb': (totalSizeBytes / (1024 * 1024)).toStringAsFixed(2),
+        'folder_counts': folderCounts,
+        'storage_path': imageDir.path,
+      };
+      
+    } catch (e) {
+      _logDebug('Error getting storage info: $e');
+      return {
+        'total_files': 0,
+        'total_size_mb': '0.00',
+        'folder_counts': {},
+        'storage_path': 'Unknown',
+      };
     }
   }
 }
