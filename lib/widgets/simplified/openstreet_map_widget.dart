@@ -754,14 +754,14 @@ class _OpenStreetMapWidgetState extends State<OpenStreetMapWidget> {
     if (_isMinimized) return Container();
     
     return Positioned(
-      bottom: 16,
+      top: 200,
       left: 16,
       right: 16,
       child: Card(
         elevation: 6,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          constraints: BoxConstraints(maxHeight: 200),
+          constraints: BoxConstraints(maxHeight: 320),
           child: Column(
             children: [
               Container(
